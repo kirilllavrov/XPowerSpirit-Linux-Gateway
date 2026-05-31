@@ -31,33 +31,25 @@ die() {
 fetch_url() {
 	local url="$1"
 	local dst="$2"
-	local max_retries=2
-	local retry=1
 
 	# Cache-buster для raw.githubusercontent.com
 	case "$url" in
 	*raw.githubusercontent.com*) url="${url}?_t=$(date +%s)" ;;
 	esac
 
-	while [ $retry -le $max_retries ]; do
-		curl -s -L --user-agent "DietPi-Xray/1.0" --max-time 15 \
-			-H "Cache-Control: no-cache, no-store" \
-			-o "$dst" "$url"
-		local rc=$?
+	curl -s -L --retry 5 --retry-delay 10 --retry-max-time 60 \
+		--user-agent "DietPi-Xray/1.0" --max-time 15 \
+		-H "Cache-Control: no-cache, no-store" \
+		-o "$dst" "$url"
+	local rc=$?
 
-		if [ $rc -eq 0 ] && [ -s "$dst" ]; then
-			if head -n 1 "$dst" 2>/dev/null | grep -qi "<html\|<!DOCTYPE"; then
-				rm -f "$dst"
-			else
-				return 0
-			fi
+	if [ $rc -eq 0 ] && [ -s "$dst" ]; then
+		if head -n 1 "$dst" 2>/dev/null | grep -qi "<html\|<!DOCTYPE"; then
+			rm -f "$dst"
+			return 1
 		fi
-
-		if [ $retry -lt $max_retries ]; then
-			sleep 2
-		fi
-		retry=$((retry + 1))
-	done
+		return 0
+	fi
 
 	return 1
 }
@@ -90,10 +82,7 @@ mkdir -p "$STATE_DIR" "$TMP_DIR"
 echo "===== $(date) =====" >>"$LOG"
 
 extract_sha256() {
-	grep '^SHA2-256' "$1" |
-		sed 's/.*= *//' |
-		tr -cd '0-9a-fA-F' |
-		cut -c1-64
+	awk -F '= ' '/^SHA2-256/{print $2}' "$1" | tr -d ' \n'
 }
 
 # =============================================

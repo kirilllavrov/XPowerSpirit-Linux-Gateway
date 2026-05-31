@@ -296,7 +296,7 @@ download_file() {
 	esac
 
 	while [ $retry -le $max_retries ]; do
-		curl -s -L --max-time 15 \
+		curl -s -L --retry 5 --retry-delay 10 --retry-max-time 60 --max-time 15 \
 			-H "Cache-Control: no-cache, no-store" \
 			-H "Pragma: no-cache" \
 			${1:+-H "$1"} \
@@ -532,10 +532,7 @@ else
 	DGST_FILE="$STATE_DIR/xray.dgst"
 
 	extract_sha256() {
-		grep '^SHA2-256' "$1" |
-			sed 's/.*= *//' |
-			tr -cd '0-9a-fA-F' |
-			cut -c1-64
+		awk -F '= ' '/^SHA2-256/{print $2}' "$1" | tr -d ' \n'
 	}
 
 	echo "  → Скачиваем .dgst для Xray..."
@@ -751,13 +748,18 @@ ExecStopPost=/usr/local/share/xray/update-nft.sh --cleanup
 Environment=XRAY_LOCATION_ASSET=/usr/local/share/xray
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=23
+LimitNPROC=10000
 LimitNOFILE=1000000
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/etc/xray /tmp /var/log
 ReadOnlyPaths=/usr/local/share/xray /usr/local/bin/xray
+RuntimeDirectory=xray
+RuntimeDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target
