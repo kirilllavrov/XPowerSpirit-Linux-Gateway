@@ -58,10 +58,7 @@ except:
 cleanup_rules() {
 	echo "→ Очистка правил Xray nftables..."
 
-	# Удаляем jump-правила из INPUT/PREROUTING/OUTPUT если есть
-	nft delete rule inet filter INPUT handle $(nft -a list chain inet filter INPUT 2>/dev/null | grep 'jump xray_input' | sed 's/.*handle //' | head -1) 2>/dev/null || true
-
-	# Удаляем таблицу целиком
+	# Удаляем таблицу xray целиком (все цепочки и правила внутри)
 	nft delete table "$TABLE_NAME" 2>/dev/null || true
 
 	# Убираем policy routing
@@ -119,8 +116,8 @@ setup_network() {
 	nft add rule "$TABLE_NAME" tproxy iifname "$LAN_IF" udp dport 443 drop
 
 	# 7. TProxy: весь остальной трафик с LAN → Xray (порт 12345)
-	nft add rule "$TABLE_NAME" tproxy iifname "$LAN_IF" meta l4proto tcp tproxy ip to 127.0.0.1:12345 meta mark set 0x1 accept
-	nft add rule "$TABLE_NAME" tproxy iifname "$LAN_IF" meta l4proto udp tproxy ip to 127.0.0.1:12345 meta mark set 0x1 accept
+	#    mark=1 нужен для policy routing (таблица 100 → lo)
+	nft add rule "$TABLE_NAME" tproxy iifname "$LAN_IF" meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:12345 meta mark set 0x1 accept
 
 	# ============================================
 	#   ЦЕПОЧКА INPUT — защита от постороннего доступа к TProxy
@@ -128,11 +125,10 @@ setup_network() {
 	nft add chain "$TABLE_NAME" input { type filter hook input priority filter \; policy accept \; }
 
 	# Блокируем прямой доступ к порту TProxy извне
-	nft add rule "$TABLE_NAME" input iifname "$LAN_IF" tcp dport 12345 drop
-	nft add rule "$TABLE_NAME" input iifname "$LAN_IF" udp dport 12345 drop
+	nft add rule "$TABLE_NAME" input iifname "$LAN_IF" meta l4proto { tcp, udp } th dport 12345 drop
 
 	# ============================================
-	#   ЦЕПОЧКА OUTPUT — заглушка
+	#   ЦЕПОЧКА OUTPUT — заглушка (шлюз не проксирует собственный трафик)
 	# ============================================
 	nft add chain "$TABLE_NAME" output { type filter hook output priority filter \; policy accept \; }
 	nft add rule "$TABLE_NAME" output return

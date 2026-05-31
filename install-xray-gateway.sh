@@ -43,7 +43,7 @@ echo ""
 echo "=== Проверка зависимостей ==="
 
 # Проверяем и устанавливаем необходимые пакеты
-REQUIRED_PACKAGES="curl python3 unzip"
+REQUIRED_PACKAGES="curl python3 unzip nftables"
 MISSING=""
 
 for pkg in $REQUIRED_PACKAGES; do
@@ -141,7 +141,12 @@ detect_network() {
 	LAN_IP=$(ip -4 addr show "$LAN_IF" | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
 	if [ -z "$LAN_IP" ]; then
 		echo "    Запрашиваю IP по DHCP..."
-		dhclient -v "$LAN_IF" 2>/dev/null || true
+		# Пробуем dhclient (isc-dhcp-client), если нет — dhcpcd (DietPi по умолчанию)
+		if command -v dhclient >/dev/null 2>&1; then
+			dhclient -v "$LAN_IF" 2>/dev/null || true
+		elif command -v dhcpcd >/dev/null 2>&1; then
+			dhcpcd -4 "$LAN_IF" 2>/dev/null || true
+		fi
 		sleep 3
 		LAN_IP=$(ip -4 addr show "$LAN_IF" | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
 	fi
@@ -738,7 +743,8 @@ ExecStartPre=/bin/sh -c '\
       ip -4 addr show $iface 2>/dev/null | grep "inet " | awk "{print \$2}" | cut -d/ -f1 > /etc/xray/gateway_ip 2>/dev/null && break; \
     }; \
   done; \
-  ntpd -q -p ru.pool.ntp.org 2>/dev/null || ntpd -q -p time.google.com 2>/dev/null || true; \
+  if command -v ntpd >/dev/null 2>&1; then ntpd -q -p ru.pool.ntp.org 2>/dev/null || true; fi; \
+  if command -v ntpdate >/dev/null 2>&1; then ntpdate -u ru.pool.ntp.org 2>/dev/null || true; fi; \
   /usr/local/share/xray/update-nft.sh || true'
 ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
 ExecStopPost=/usr/local/share/xray/update-nft.sh --cleanup

@@ -127,7 +127,7 @@ def parse_vless_uri(uri: str, idx: int):
 
     user = parsed.username or ""
     host = parsed.hostname or ""
-    port = parsed.port or 443
+    port = parsed.port if parsed.port is not None else 443
 
     # ТЕГ
     fragment = parsed.fragment or ""
