@@ -274,7 +274,7 @@ def parse_vless_uri(uri: str, idx: int):
 def _is_json_format(user_agent: str) -> bool:
     """Определяет, является ли User-Agent признаком JSON-подписки"""
     ua_lower = user_agent.lower()
-    json_markers = ["happ", "singbox", "sfa", "sfi", "sfm", "sft", "karing"]
+    json_markers = ["xpower", "happ", "singbox", "sfa", "sfi", "sfm", "sft", "karing"]
     return any(m in ua_lower for m in json_markers)
 
 
