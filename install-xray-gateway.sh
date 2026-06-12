@@ -749,9 +749,6 @@ GEO_DIR="$(settings_get '.geodata.dir')"
 GEOIP_URL="$(settings_get '.geodata.geoip_url')"
 GEOSITE_URL="$(settings_get '.geodata.geosite_url')"
 
-echo "  geoip  : $GEOIP_URL"
-echo "  geosite: $GEOSITE_URL"
-
 update_geo "$GEOIP_URL" "$GEO_DIR/geoip.dat"
 update_geo "$GEOSITE_URL" "$GEO_DIR/geosite.dat"
 
