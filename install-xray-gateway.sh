@@ -302,12 +302,18 @@ done
 # ============================================
 #   ЕДИНАЯ ФУНКЦИЯ ЗАГРУЗКИ
 # ============================================
+
+# Универсальная загрузка файла (с авто-заголовками из settings.json + до 3 кастомных)
+# Автоматически повторяет при неудаче: 3 попытки с растущей задержкой
+# Использование:
+#   download_file "URL" "DEST" ["HEADER1" "HEADER2" "HEADER3"]
 download_file() {
 	local url="$1"
 	local dst="$2"
 	shift 2
 	local max_retries=3
 	local retry=1
+	local delay=2
 
 	# Системные заголовки из settings.json (могут быть пустыми при первом запуске)
 	local _ua _ver _model _os
@@ -343,7 +349,9 @@ download_file() {
 		fi
 
 		if [ $retry -lt $max_retries ]; then
-			sleep 2
+			echo "     → Попытка $retry не удалась, повтор через ${delay}с..." >&2
+			sleep "$delay"
+			delay=$((delay * 2))  # 2с → 4с → 8с
 		fi
 		retry=$((retry + 1))
 	done
@@ -386,21 +394,17 @@ echo "=== Шаг 2: Сохранение настроек ==="
 echo "  → Загружаю settings.default.json..."
 if [ ! -f "$SETTINGS_JSON" ]; then
 	download_file "$REPO/settings.default.json" "$SETTINGS_JSON" || {
-		echo "  [!] Не удалось скачать settings.default.json — создаю локально"
-		python3 -c "
-import json
-cfg={
-    'subscription':{'url':'','user_agent':'$SUB_USER_AGENT','remarks':''},
-    'hwid':'',
-    'device_model':'$DEVICE_MODEL','device_os':'$DEVICE_OS','ver_os':'$VER_OS',
-    'network':{'interface':'','ip':'','mask':'$LAN_MASK','gateway':''},
-    'xray':{'gid':990,'tproxy_port':12345,'tproxy_mark':1,'bypass_mark':2},
-    'dns':{'servers':'77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0','local_tcp_ports':'8090','dwl_domain':''},
-    'geodata':{'dir':'/usr/local/share/xray','geoip_url':'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat','geosite_url':'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat'},
-    'routing':{'direct':{'domains':['geosite:private','geosite:category-browser','geosite:category-cdn-ru','geosite:category-mobile','geosite:category-ru'],'ips':['geoip:ru','geoip:private']},'block':{'domains':['geosite:category-ads']},'proxy':{'domains':['geosite:category-streaming','geosite:category-games']},'doh_bypass':['common.dot.dns.yandex.net','cloudflare-dns.com','dns.google','dns.quad9.net','doh.opendns.com','dns.nextdns.io']}
-}
-json.dump(cfg,open('$SETTINGS_JSON','w'),indent=2,ensure_ascii=False)
-"
+		echo ""
+		echo "  ╔══════════════════════════════════════════════════╗"
+		echo "  ║  [X] Не удалось загрузить settings.default.json  ║"
+		echo "  ║                                                 ║"
+		echo "  ║  Проверьте:                                      ║"
+		echo "  ║  1. Доступ в интернет                            ║"
+		echo "  ║  2. GitHub не заблокирован                       ║"
+		echo "  ║  3. Репозиторий $REPO существует                 ║"
+		echo "  ╚══════════════════════════════════════════════════╝"
+		echo ""
+		exit 1
 	}
 fi
 
@@ -693,9 +697,12 @@ download_script "$REPO/xray-sub-parser.py" "$PARSER"
 download_script "$REPO/update-xray.sh" "$UPDATER"
 download_script "$REPO/update-nft.sh" "$NFT_UPDATER"
 
-# Скачиваем settings.default.json (если settings.json ещё нет)
+# Скачиваем settings.default.json (если settings.json ещё нет — резервная попытка)
 if [ ! -f "$SETTINGS_JSON" ]; then
-	download_file "$REPO/settings.default.json" "$SETTINGS_JSON" || true
+	download_file "$REPO/settings.default.json" "$SETTINGS_JSON" || {
+		echo "  [X] Не удалось загрузить settings.default.json (повторная попытка)"
+		exit 1
+	}
 fi
 
 echo "[+] Все скрипты загружены"
