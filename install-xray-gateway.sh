@@ -844,15 +844,8 @@ Group=xray
 SupplementaryGroups=xray
 ExecStartPre=/bin/sh -c '\
   while ! ip route | grep -q default; do sleep 2; done; \
-  ip -4 addr show eth0 2>/dev/null | grep "inet " | awk "{print \$2}" | cut -d/ -f1 > /etc/xray/gateway_ip 2>/dev/null || true; \
-  for iface in $(ls /sys/class/net/ | grep -v lo); do \
-    [ -f /sys/class/net/$iface/operstate ] && [ "$(cat /sys/class/net/$iface/operstate)" = "up" ] && { \
-      ip -4 addr show $iface 2>/dev/null | grep "inet " | awk "{print \$2}" | cut -d/ -f1 > /etc/xray/gateway_ip 2>/dev/null && break; \
-    }; \
-  done; \
-  if command -v ntpd >/dev/null 2>&1; then ntpd -q -p ru.pool.ntp.org 2>/dev/null || true; fi; \
   if command -v ntpdate >/dev/null 2>&1; then ntpdate -u ru.pool.ntp.org 2>/dev/null || true; fi; \
-  /usr/local/share/xray/update-nft.sh || true'
+  /usr/local/share/xray/update-nft.sh || { echo "[X] nftables failed" >&2; exit 1; }'
 ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
 ExecStopPost=/usr/local/share/xray/update-nft.sh --cleanup
 Environment=XRAY_LOCATION_ASSET=/usr/local/share/xray

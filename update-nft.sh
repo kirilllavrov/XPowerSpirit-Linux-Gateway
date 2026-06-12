@@ -142,7 +142,7 @@ setup_network() {
 	nft add element "$TABLE_NAME" reserved_v4 { 169.254.0.0/16 }
 	nft add element "$TABLE_NAME" reserved_v4 { 224.0.0.0/4 }
 	nft add element "$TABLE_NAME" reserved_v4 { 240.0.0.0/4 }
-	nft add element "$TABLE_NAME" reserved_v4 { 255.255.255.255 }
+	nft add element "$TABLE_NAME" reserved_v4 { 255.255.255.255/32 }
 
 	# ============================================
 	#   ЦЕПОЧКА tproxy (PREROUTING)
