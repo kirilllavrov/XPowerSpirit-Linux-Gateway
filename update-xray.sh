@@ -93,18 +93,13 @@ XRAY_BIN="/usr/local/bin/xray"
 GENERATOR="/usr/local/share/xray/xray-generate-config.py"
 PARSER="/usr/local/share/xray/xray-sub-parser.py"
 NFT_UPDATER="/usr/local/share/xray/update-nft.sh"
-REPO="https://raw.githubusercontent.com/kirilllavrov/XPowerSpirit-Linux-Gateway/main"
 
-# Геоданные — из settings.json (с умолчаниями)
+# Геоданные — из settings.json
 GEO_DIR="$(settings_get '.geodata.dir')"
-[ -z "$GEO_DIR" ] && GEO_DIR="/usr/local/share/xray"
 GEOIP="$GEO_DIR/geoip.dat"
 GEOSITE="$GEO_DIR/geosite.dat"
-
 GEOIP_URL="$(settings_get '.geodata.geoip_url')"
-[ -z "$GEOIP_URL" ] && GEOIP_URL="https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat"
 GEOSITE_URL="$(settings_get '.geodata.geosite_url')"
-[ -z "$GEOSITE_URL" ] && GEOSITE_URL="https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat"
 
 mkdir -p "$STATE_DIR" "$TMP_DIR"
 
@@ -290,21 +285,6 @@ update_geo() {
 
 update_geo "$GEOIP_URL" "$GEOIP"
 update_geo "$GEOSITE_URL" "$GEOSITE"
-
-# ============================
-#   Обновление скриптов из репозитория
-# ============================
-
-echo "→ Обновление скриптов..." >>"$LOG"
-for scr in xray-generate-config.py xray-sub-parser.py update-nft.sh; do
-	fetch_url "$REPO/$scr" "/tmp/${scr}" && mv "/tmp/${scr}" "/usr/local/share/xray/${scr}" && chmod +x "/usr/local/share/xray/${scr}" 2>/dev/null
-done
-
-# Обновляем settings.default.json (только если settings.json отсутствует)
-if [ ! -f "$SETTINGS_JSON" ]; then
-	fetch_url "$REPO/settings.default.json" "$SETTINGS_JSON" 2>/dev/null || true
-fi
-echo "→ Скрипты обновлены" >>"$LOG"
 
 # ============================
 #   Генерация config.json (поддерживает оба формата)

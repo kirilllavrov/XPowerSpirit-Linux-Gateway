@@ -97,7 +97,9 @@ echo ""
 # ============================================
 #   ПЕРЕМЕННЫЕ
 # ============================================
-REPO="https://raw.githubusercontent.com/kirilllavrov/XPowerSpirit-Linux-Gateway/main"
+# REPO: сначала хардкод (нужен до загрузки settings.json), потом из settings.json
+REPO_FALLBACK="https://raw.githubusercontent.com/kirilllavrov/XPowerSpirit-Linux-Gateway/main"
+REPO="$REPO_FALLBACK"
 GENERATOR="/usr/local/share/xray/xray-generate-config.py"
 PARSER="/usr/local/share/xray/xray-sub-parser.py"
 UPDATER="/usr/local/share/xray/update-xray.sh"
@@ -408,6 +410,10 @@ if [ ! -f "$SETTINGS_JSON" ]; then
 	}
 fi
 
+# Обновляем REPO из settings.json (если указан)
+_repo=$(settings_get '.repo')
+[ -n "$_repo" ] && REPO="$_repo"
+
 settings_set '.subscription.url' "$SUB_URL"
 echo "[+] URL подписки сохранён"
 
@@ -697,14 +703,6 @@ download_script "$REPO/xray-sub-parser.py" "$PARSER"
 download_script "$REPO/update-xray.sh" "$UPDATER"
 download_script "$REPO/update-nft.sh" "$NFT_UPDATER"
 
-# Скачиваем settings.default.json (если settings.json ещё нет — резервная попытка)
-if [ ! -f "$SETTINGS_JSON" ]; then
-	download_file "$REPO/settings.default.json" "$SETTINGS_JSON" || {
-		echo "  [X] Не удалось загрузить settings.default.json (повторная попытка)"
-		exit 1
-	}
-fi
-
 echo "[+] Все скрипты загружены"
 
 # ============================================
@@ -751,7 +749,6 @@ update_geo() {
 }
 
 GEO_DIR="$(settings_get '.geodata.dir')"
-[ -z "$GEO_DIR" ] && GEO_DIR="/usr/local/share/xray"
 GEOIP_URL="$(settings_get '.geodata.geoip_url')"
 GEOSITE_URL="$(settings_get '.geodata.geosite_url')"
 
