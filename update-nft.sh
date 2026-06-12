@@ -149,51 +149,40 @@ setup_network() {
 	# ============================================
 	nft add chain "$TABLE_NAME" xray_tproxy { type filter hook prerouting priority mangle \; policy accept \; }
 
-	# 1. Пропускаем уже установленные/связанные соединения (оптимизация)
-	#    Это аналог DIVERT из iptables — не перехватываем пакеты
-	#    существующих соединений повторно.
-	nft add rule "$TABLE_NAME" xray_tproxy ct state { established, related } accept
-
-	# 2. Bypass по mark: трафик самого Xray (sockopt.mark=2)
+	# 1. Bypass по mark: трафик самого Xray (sockopt.mark=2)
 	nft add rule "$TABLE_NAME" xray_tproxy meta mark "$BYPASS_MARK" return
 
-	# 3. DHCP — не трогаем
+	# 2. DHCP — не трогаем
 	nft add rule "$TABLE_NAME" xray_tproxy udp dport { 67, 68 } return
 
-	# 4. Локальные сервисы шлюза (TorrServer, dnsmasq, etc.)
+	# 3. Локальные сервисы шлюза (TorrServer, dnsmasq, etc.)
 	#    ВСЕ пакеты, адресованные локальным IP шлюза — bypass
 	nft add rule "$TABLE_NAME" xray_tproxy fib daddr type local return
 
-	# 5. ЯВНЫЙ bypass портов локальных сервисов (защита от краевых случаев)
+	# 4. ЯВНЫЙ bypass портов локальных сервисов (защита от краевых случаев)
 	if [ -n "$LOCAL_TCP_PORTS" ]; then
 		for port in $LOCAL_TCP_PORTS; do
 			nft add rule "$TABLE_NAME" xray_tproxy tcp dport "$port" return
 		done
 	fi
 
-	# 6. Приватные/мультикаст/бродкаст адреса — не трогаем
+	# 5. Приватные/мультикаст/бродкаст адреса — не трогаем
 	nft add rule "$TABLE_NAME" xray_tproxy ip daddr @reserved_v4 return
 
-	# 7. Публичные DNS (не-DNS трафик к этим IP) — bypass
-	#    Например, если клиент по ошибке ломится на 8.8.8.8:443
+	# 6. Публичные DNS (не-DNS трафик к этим IP) — bypass
 	nft add rule "$TABLE_NAME" xray_tproxy ip daddr @dns_v4 tcp dport != 53 return
 	nft add rule "$TABLE_NAME" xray_tproxy ip daddr @dns_v4 udp dport != 53 return
 
-	# 8. Блокировка QUIC (UDP/443) — на входе, ДО TProxy
-	#    Вынуждает браузеры использовать TCP/HTTPS
+	# 7. Блокировка QUIC (UDP/443) — на входе, ДО TProxy
 	nft add rule "$TABLE_NAME" xray_tproxy iifname "$LAN_IF" udp dport 443 drop
 
-	# 9. Отбрасываем IPv6 трафик от клиентов (шлюз — IPv4-only)
-	#    Предотвращает утечки IPv6 в обход прокси
+	# 8. Отбрасываем IPv6 трафик от клиентов (шлюз — IPv4-only)
 	nft add rule "$TABLE_NAME" xray_tproxy meta nfproto ipv6 drop
 
-	# 10. TProxy: трафик с LAN → Xray (порт 12345)
-	#     mark=1 нужен для policy routing (таблица 100 → lo)
+	# 9. TProxy: трафик с LAN → Xray (порт 12345)
 	nft add rule "$TABLE_NAME" xray_tproxy iifname "$LAN_IF" meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:"$TPROXY_PORT" meta mark set "$TPROXY_MARK" accept
 
-	# 11. TProxy: собственный трафик шлюза (приходит на lo после policy routing)
-	#     Шлюз сам ходит в интернет через Xray.
-	#     Исключения (Xray, DNS, локальные сервисы) уже отсеяны в правилах 1-9.
+	# 10. TProxy: собственный трафик шлюза (приходит на lo после policy routing)
 	nft add rule "$TABLE_NAME" xray_tproxy iifname "lo" meta l4proto { tcp, udp } tproxy ip to 127.0.0.1:"$TPROXY_PORT" meta mark set "$TPROXY_MARK" accept
 
 	# ============================================
