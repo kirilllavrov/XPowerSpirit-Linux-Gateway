@@ -27,19 +27,28 @@ die() {
 	exit 1
 }
 
-# Единая функция загрузки (curl) — с обходом кеша GitHub
+# Единая функция загрузки (curl) — с авто-заголовками из settings.json
 fetch_url() {
 	local url="$1"
 	local dst="$2"
+
+	# Системные заголовки из settings.json
+	local _ua _ver _model _os
+	_ua=$(settings_get ".subscription.user_agent" 2>/dev/null || echo "XPower/1.0")
+	_ver=$(settings_get ".ver_os" 2>/dev/null || echo "")
+	_model=$(settings_get ".device_model" 2>/dev/null || echo "")
+	_os=$(settings_get ".device_os" 2>/dev/null || echo "")
 
 	# Cache-buster для raw.githubusercontent.com
 	case "$url" in
 	*raw.githubusercontent.com*) url="${url}?_t=$(date +%s)" ;;
 	esac
 
-	curl -s -L --retry 5 --retry-delay 10 --retry-max-time 60 \
-		--user-agent "DietPi-Xray/1.0" --max-time 15 \
-		-H "Cache-Control: no-cache, no-store" \
+	curl -s -L --max-time 15 \
+		-H "User-Agent: $_ua" \
+		${_ver:+-H "X-Ver-Os: $_ver"} \
+		${_model:+-H "X-Device-Model: $_model"} \
+		${_os:+-H "X-Device-Os: $_os"} \
 		-o "$dst" "$url"
 	local rc=$?
 
