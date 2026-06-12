@@ -34,7 +34,7 @@ DNS_IPS="77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0"
 #   HELPER: чтение settings.json
 # ============================================
 settings_get() {
-	python3 -c "import json; cfg=json.load(open('$SETTINGS_JSON')); print(cfg${1} if ${1} else '')" 2>/dev/null || true
+	jq -r "${1} // empty" "$SETTINGS_JSON" 2>/dev/null
 }
 
 # Читаем настройки из settings.json (если есть), иначе умолчания
@@ -61,15 +61,10 @@ fi
 # ============================================
 #   АВТООПРЕДЕЛЕНИЕ LAN
 # ============================================
-if ip link show eth0 >/dev/null 2>&1; then
-	LAN_IF="eth0"
-elif ip link show enp1s0 >/dev/null 2>&1; then
-	LAN_IF="enp1s0"
-elif ip link show end0 >/dev/null 2>&1; then
-	LAN_IF="end0"
-else
-	LAN_IF=$(ip -4 addr show | grep -v 'lo\|docker\|virbr\|wg\|tun\|veth' | grep 'inet ' | head -1 | awk '{print $NF}')
-fi
+LAN_IF=$(ip -o -4 addr show 2>/dev/null | \
+	awk '{print $2}' | \
+	grep -vE '^(lo|docker|virbr|wg|tun|veth|br-)' | \
+	head -1)
 
 if [ -z "$LAN_IF" ]; then
 	echo "[X] Не удалось определить LAN интерфейс" >&2

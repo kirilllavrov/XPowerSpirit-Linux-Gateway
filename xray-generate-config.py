@@ -359,6 +359,11 @@ def build_direct_config() -> dict:
         build_dns_outbound()
     ]
     rt = load_routing()
+    doh = rt.get("doh_bypass", [])
+    block_domains = rt.get("block", {}).get("domains", [])
+    direct_ips = rt.get("direct", {}).get("ips", [])
+    direct_domains = rt.get("direct", {}).get("domains", [])
+
     cfg["routing"] = {
         "domainStrategy": "IPOnDemand",
         "rules": [
@@ -375,22 +380,22 @@ def build_direct_config() -> dict:
             },
             {
                 "type": "field",
-                "domain": rt["doh_bypass"],
+                "domain": doh,
                 "outboundTag": "direct"
             },
             {
                 "type": "field",
-                "domain": rt["block"]["domains"],
+                "domain": block_domains,
                 "outboundTag": "block"
             },
             {
                 "type": "field",
-                "ip": rt["direct"]["ips"],
+                "ip": direct_ips,
                 "outboundTag": "direct"
             },
             {
                 "type": "field",
-                "domain": rt["direct"]["domains"],
+                "domain": direct_domains,
                 "outboundTag": "direct"
             },
             {
@@ -426,6 +431,12 @@ def build_rules(proxy_outbounds: list) -> list:
     Если несколько прокси — использует балансировщик.
     """
     rt = load_routing()
+    doh = rt.get("doh_bypass", [])
+    block_domains = rt.get("block", {}).get("domains", [])
+    direct_ips = rt.get("direct", {}).get("ips", [])
+    direct_domains = rt.get("direct", {}).get("domains", [])
+    proxy_domains = rt.get("proxy", {}).get("domains", [])
+
     rules = [
         # DNS inbound (принимает на IP шлюза:53) → dns-out (hijack → dns-inbuilt)
         {
@@ -443,13 +454,13 @@ def build_rules(proxy_outbounds: list) -> list:
         # Ловим прямой DoH от браузеров — отправляем напрямую (уже зашифрован)
         {
             "type": "field",
-            "domain": rt["doh_bypass"],
+            "domain": doh,
             "outboundTag": "direct"
         },
         # Блокировка рекламы
         {
             "type": "field",
-            "domain": rt["block"]["domains"],
+            "domain": block_domains,
             "outboundTag": "block"
         },
         # NTP (порт 123) — напрямую
@@ -469,32 +480,34 @@ def build_rules(proxy_outbounds: list) -> list:
         # Локальные и российские IP — напрямую
         {
             "type": "field",
-            "ip": rt["direct"]["ips"],
+            "ip": direct_ips,
             "outboundTag": "direct"
         },
         # Локальные и российские домены — напрямую
         {
             "type": "field",
-            "domain": rt["direct"]["domains"],
+            "domain": direct_domains,
             "outboundTag": "direct"
         },
     ]
 
     if proxy_outbounds:
-        target = "balancer" if len(proxy_outbounds) > 1 else proxy_outbounds[0]["tag"]
+        use_balancer = len(proxy_outbounds) > 1
+        target = "balancer" if use_balancer else proxy_outbounds[0]["tag"]
+        route_key = "balancerTag" if use_balancer else "outboundTag"
 
         # Стриминг и игры — через прокси
         rules.append({
             "type": "field",
-            "domain": rt["proxy"]["domains"],
-            "balancerTag" if len(proxy_outbounds) > 1 else "outboundTag": target
+            "domain": proxy_domains,
+            route_key: target
         })
 
         # Весь остальной трафик
         rules.append({
             "type": "field",
             "network": "tcp,udp",
-            "balancerTag" if len(proxy_outbounds) > 1 else "outboundTag": target
+            route_key: target
         })
     else:
         rules.append({

@@ -83,7 +83,7 @@ SETTINGS_JSON="$CONFIG_DIR/settings.json"
 #   HELPER: чтение settings.json
 # ============================================
 settings_get() {
-	python3 -c "import json; cfg=json.load(open('$SETTINGS_JSON')); print(cfg${1} if ${1} else '')" 2>/dev/null || true
+	jq -r "${1} // empty" "$SETTINGS_JSON" 2>/dev/null
 }
 
 STATE_DIR="/etc/xray/state"

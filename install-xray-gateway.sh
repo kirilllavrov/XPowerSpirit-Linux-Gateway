@@ -43,7 +43,7 @@ echo ""
 echo "=== Проверка зависимостей ==="
 
 # Проверяем и устанавливаем необходимые пакеты
-REQUIRED_PACKAGES="curl python3 unzip nftables iproute2"
+REQUIRED_PACKAGES="curl python3 unzip nftables iproute2 jq"
 MISSING=""
 
 for pkg in $REQUIRED_PACKAGES; do
@@ -114,21 +114,12 @@ SUB_USER_AGENT="XPower/1.0"
 #   HELPER: чтение/запись settings.json
 # ============================================
 settings_get() {
-	python3 -c "import json; cfg=json.load(open('$SETTINGS_JSON')); print(cfg${1} if ${1} else '')" 2>/dev/null || true
+	jq -r "${1} // empty" "$SETTINGS_JSON" 2>/dev/null
 }
 
 settings_set() {
-	local key="$1" val="$2"
-	python3 -c "
-import json
-cfg=json.load(open('$SETTINGS_JSON'))
-keys='${key}'.lstrip('.').split('.')
-ptr=cfg
-for k in keys[:-1]:
-    ptr=ptr.setdefault(k,{})
-ptr[keys[-1]]='${val}'
-json.dump(cfg,open('$SETTINGS_JSON','w'),indent=2,ensure_ascii=False)
-" 2>/dev/null || true
+	local key="$1" val="$2" tmp="${SETTINGS_JSON}.tmp"
+	jq --arg v "$val" "${key} = \$v" "$SETTINGS_JSON" > "$tmp" 2>/dev/null && mv "$tmp" "$SETTINGS_JSON"
 }
 
 # Сетевые параметры
