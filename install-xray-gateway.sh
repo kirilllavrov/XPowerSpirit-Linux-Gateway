@@ -148,13 +148,16 @@ detect_network() {
 
 	# Ищем Ethernet-интерфейс (не loopback, не docker, не wg, не tun)
 	LAN_IF=$(ip -4 addr show | grep -v 'lo\|docker\|virbr\|wg\|tun\|veth' | grep 'inet ' | grep -E 'eth[0-9]|enp|ens|end' | head -1 | awk '{print $NF}')
-	
+
 	if [ -z "$LAN_IF" ]; then
 		# Fallback: любой не-loopback интерфейс с IP
 		LAN_IF=$(ip -4 addr show | grep -v 'lo\|docker\|virbr\|wg\|tun\|veth' | grep 'inet ' | head -1 | awk '{print $NF}')
 	fi
 
-	[ -z "$LAN_IF" ] && { echo "[X] Не удалось определить сетевой интерфейс"; exit 1; }
+	[ -z "$LAN_IF" ] && {
+		echo "[X] Не удалось определить сетевой интерфейс"
+		exit 1
+	}
 	echo "    Интерфейс: $LAN_IF"
 
 	# Определяем текущий IP
@@ -171,7 +174,10 @@ detect_network() {
 		LAN_IP=$(ip -4 addr show "$LAN_IF" | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
 	fi
 
-	[ -z "$LAN_IP" ] && { echo "[X] Не удалось получить IP. Проверьте кабель."; exit 1; }
+	[ -z "$LAN_IP" ] && {
+		echo "[X] Не удалось получить IP. Проверьте кабель."
+		exit 1
+	}
 
 	# Определяем шлюз по умолчанию
 	GATEWAY_IP=$(ip route | grep '^default' | awk '{print $3}')
@@ -351,7 +357,7 @@ download_file() {
 		if [ $retry -lt $max_retries ]; then
 			echo "     → Попытка $retry не удалась, повтор через ${delay}с..." >&2
 			sleep "$delay"
-			delay=$((delay * 2))  # 2с → 4с → 8с
+			delay=$((delay * 2)) # 2с → 4с → 8с
 		fi
 		retry=$((retry + 1))
 	done
@@ -389,7 +395,10 @@ update_geo() {
 		exit 1
 	}
 	REMOTE_SHA="$(cut -d' ' -f1 "$TMP_SHA")"
-	[ -z "$REMOTE_SHA" ] && { echo "  [X] Пустой SHA256 для $BASE"; exit 1; }
+	[ -z "$REMOTE_SHA" ] && {
+		echo "  [X] Пустой SHA256 для $BASE"
+		exit 1
+	}
 
 	# Проверяем, не тот же ли уже файл
 	if [ -f "$SHA_FILE" ] && [ "$(cat "$SHA_FILE")" = "$REMOTE_SHA" ] && [ -f "$DEST" ]; then
@@ -451,7 +460,7 @@ if [ ! -f "$SETTINGS_JSON" ]; then
 		echo ""
 		echo "  ╔══════════════════════════════════════════════════╗"
 		echo "  ║  [X] Не удалось загрузить settings.default.json  ║"
-		echo "  ║                                                 ║"
+		echo "  ║                                                  ║"
 		echo "  ║  Проверьте:                                      ║"
 		echo "  ║  1. Доступ в интернет                            ║"
 		echo "  ║  2. GitHub не заблокирован                       ║"
@@ -526,7 +535,7 @@ BACKUP_FILE="/etc/network/interfaces.bak.$$"
 cp "$INTERFACES_FILE" "$BACKUP_FILE" 2>/dev/null || true
 
 # Оставляем только loopback и наш LAN интерфейс
-cat > "$INTERFACES_FILE" <<EOF
+cat >"$INTERFACES_FILE" <<EOF
 # Xray Transparent Gateway — конфигурация сети
 # Исходный конфиг сохранён в $BACKUP_FILE
 
@@ -536,13 +545,13 @@ iface lo inet loopback
 EOF
 
 if [ "$USE_DHCP" = "1" ]; then
-	cat >> "$INTERFACES_FILE" <<EOF
+	cat >>"$INTERFACES_FILE" <<EOF
 auto $LAN_IF
 iface $LAN_IF inet dhcp
 EOF
 	echo "  → Режим DHCP"
 else
-	cat >> "$INTERFACES_FILE" <<EOF
+	cat >>"$INTERFACES_FILE" <<EOF
 auto $LAN_IF
 iface $LAN_IF inet static
     address $LAN_IP
@@ -569,7 +578,7 @@ echo "=== Установка dnsmasq ==="
 apt-get install -y -qq dnsmasq 2>/dev/null || true
 
 # Конфигурация dnsmasq: DNS-фронтенд, без DHCP
-cat > /etc/dnsmasq.conf <<'DNSMASQ_EOF'
+cat >/etc/dnsmasq.conf <<'DNSMASQ_EOF'
 # Xray Transparent Gateway — DNS-фронтенд
 # Принимает запросы клиентов на :53, форвардит в Xray dns-in на :5353
 
@@ -614,12 +623,12 @@ if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
 	systemctl disable systemd-resolved 2>/dev/null || true
 	# Удаляем симлинк /etc/resolv.conf → systemd-resolved stub
 	rm -f /etc/resolv.conf
-	echo "nameserver 127.0.0.1" > /etc/resolv.conf
+	echo "nameserver 127.0.0.1" >/etc/resolv.conf
 	echo "  → systemd-resolved отключён, DNS через dnsmasq (127.0.0.1:53)"
 else
 	# На всякий случай: если resolv.conf指向 внешний DNS — переключаем на локальный
 	if ! grep -q "^nameserver 127.0.0.1" /etc/resolv.conf 2>/dev/null; then
-		echo "nameserver 127.0.0.1" > /etc/resolv.conf
+		echo "nameserver 127.0.0.1" >/etc/resolv.conf
 		echo "  → resolv.conf переключён на 127.0.0.1"
 	fi
 fi
@@ -630,9 +639,9 @@ if [ "$USE_DHCP" != "1" ] && [ "$LAN_IP" != "$OLD_IP" ]; then
 	echo ""
 	echo "  ╔══════════════════════════════════════════════════╗"
 	echo "  ║  [!] IP изменится при перезагрузке:              ║"
-	echo "  ║      Было : $OLD_IP"
-	echo "  ║      Стало: $LAN_IP"
-	echo "  ║                                                 ║"
+	echo "  ║      Было : $OLD_IP"                             ║"
+	echo "  ║ Стало: $LAN_IP"                                  ║"
+	echo "  ║                                                  ║"
 	echo "  ║  После перезагрузки подключайтесь к $LAN_IP      ║"
 	echo "  ╚══════════════════════════════════════════════════╝"
 	echo ""
@@ -678,7 +687,7 @@ else
 	aarch64) MACHINE="arm64-v8a" ;;
 	armv7l) MACHINE="arm32-v7a" ;;
 	armv6l) MACHINE="arm32-v6" ;;
-	*) MACHINE="arm64-v8a" ;;  # DietPi обычно arm64
+	*) MACHINE="arm64-v8a" ;; # DietPi обычно arm64
 	esac
 
 	ZIP_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST_VERSION}/Xray-linux-${MACHINE}.zip"
@@ -759,7 +768,7 @@ echo "  ✓ HWID: $HWID"
 echo "  → Скачиваем подписку и генерируем config.json..."
 
 if download_file "$SUB_URL" "/tmp/sub_raw.txt" "User-Agent: $SUB_USER_AGENT" "x-hwid: $HWID"; then
-	
+
 	if head -n 1 "/tmp/sub_raw.txt" 2>/dev/null | grep -qi "<html\|<!DOCTYPE"; then
 		echo "  [X] Подписка вернула HTML вместо данных"
 		rm -f "/tmp/sub_raw.txt"
@@ -769,8 +778,8 @@ if download_file "$SUB_URL" "/tmp/sub_raw.txt" "User-Agent: $SUB_USER_AGENT" "x-
 	PARSER_ARGS="python3 $PARSER --ua \"$SUB_USER_AGENT\""
 	[ -n "$REMARKS_FILTER" ] && PARSER_ARGS="$PARSER_ARGS --remarks \"$REMARKS_FILTER\""
 
-	if eval $PARSER_ARGS < "/tmp/sub_raw.txt" > "/tmp/parsed.json" 2>>"$LOG_FILE"; then
-		if python3 "$GENERATOR" --format unified --output "$CONFIG_JSON" < "/tmp/parsed.json" 2>>"$LOG_FILE"; then
+	if eval $PARSER_ARGS <"/tmp/sub_raw.txt" >"/tmp/parsed.json" 2>>"$LOG_FILE"; then
+		if python3 "$GENERATOR" --format unified --output "$CONFIG_JSON" <"/tmp/parsed.json" 2>>"$LOG_FILE"; then
 			echo "  ✓ config.json создан"
 		else
 			echo "  [X] Ошибка генератора конфига"
@@ -921,9 +930,9 @@ echo "=== Шаг 12: Cron ==="
 
 CRON_ENTRY="30 2 * * * $UPDATER"
 TMP_CRON="/tmp/crontab.$$"
-crontab -l 2>/dev/null > "$TMP_CRON" || true
+crontab -l 2>/dev/null >"$TMP_CRON" || true
 if ! grep -qF "$UPDATER" "$TMP_CRON" 2>/dev/null; then
-	echo "$CRON_ENTRY" >> "$TMP_CRON"
+	echo "$CRON_ENTRY" >>"$TMP_CRON"
 	crontab "$TMP_CRON"
 	echo "[+] Cron: автообновление в 2:30 ночи"
 else
@@ -1049,7 +1058,7 @@ if [ -t 0 ]; then
 	REBOOT_CHOICE="${REBOOT_CHOICE:-Y}"
 
 	case "$REBOOT_CHOICE" in
-	[Yy]|[Yy][Ee][Ss]|"")
+	[Yy] | [Yy][Ee][Ss] | "")
 		echo ""
 		echo "  Перезагрузка через 3 секунды..."
 		sleep 3
