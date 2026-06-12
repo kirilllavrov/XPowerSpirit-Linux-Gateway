@@ -97,9 +97,7 @@ echo ""
 # ============================================
 #   ПЕРЕМЕННЫЕ
 # ============================================
-# REPO: сначала хардкод (нужен до загрузки settings.json), потом из settings.json
-REPO_FALLBACK="https://raw.githubusercontent.com/kirilllavrov/XPowerSpirit-Linux-Gateway/main"
-REPO="$REPO_FALLBACK"
+REPO="https://raw.githubusercontent.com/kirilllavrov/XPowerSpirit-Linux-Gateway/main"
 GENERATOR="/usr/local/share/xray/xray-generate-config.py"
 PARSER="/usr/local/share/xray/xray-sub-parser.py"
 UPDATER="/usr/local/share/xray/update-xray.sh"
@@ -361,6 +359,60 @@ download_file() {
 	return 1
 }
 
+download_script() {
+	local url="$1"
+	local dst="$2"
+	if download_file "$url" "$dst"; then
+		chmod +x "$dst"
+		echo "  → $dst"
+	else
+		echo "  [X] Ошибка: не удалось скачать $dst"
+		exit 1
+	fi
+}
+
+extract_sha256() {
+	awk -F '= ' '/^SHA2-256/{print $2}' "$1" | tr -d ' \n'
+}
+
+update_geo() {
+	local URL="$1"
+	local DEST="$2"
+	local BASE="$(basename "$DEST")"
+	local TMP="/tmp/$BASE.tmp"
+	local TMP_SHA="/tmp/$BASE.sha256"
+	local SHA_FILE="${STATE_DIR}/${BASE}.sha256sum"
+
+	echo "  → $BASE"
+	download_file "${URL}.sha256sum" "$TMP_SHA" || {
+		echo "  [X] Не удалось получить SHA256 для $BASE"
+		exit 1
+	}
+	REMOTE_SHA="$(cut -d' ' -f1 "$TMP_SHA")"
+	[ -z "$REMOTE_SHA" ] && { echo "  [X] Пустой SHA256 для $BASE"; exit 1; }
+
+	# Проверяем, не тот же ли уже файл
+	if [ -f "$SHA_FILE" ] && [ "$(cat "$SHA_FILE")" = "$REMOTE_SHA" ] && [ -f "$DEST" ]; then
+		echo "  ✓ $BASE не изменился"
+		rm -f "$TMP_SHA"
+		return
+	fi
+
+	download_file "$URL" "$TMP" || {
+		echo "  [X] Не удалось скачать $BASE"
+		exit 1
+	}
+	LOCAL_SHA="$(sha256sum "$TMP" | awk '{print $1}')"
+	if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+		echo "  [X] SHA не совпадает для $BASE"
+		rm -f "$TMP" "$TMP_SHA"
+		exit 1
+	fi
+	mv "$TMP" "$DEST"
+	echo "$REMOTE_SHA" >"$SHA_FILE"
+	echo "  ✓ $BASE готов"
+}
+
 # ============================================
 #   СОЗДАНИЕ ДИРЕКТОРИЙ
 # ============================================
@@ -409,10 +461,6 @@ if [ ! -f "$SETTINGS_JSON" ]; then
 		exit 1
 	}
 fi
-
-# Обновляем REPO из settings.json (если указан)
-_repo=$(settings_get '.repo')
-[ -n "$_repo" ] && REPO="$_repo"
 
 settings_set '.subscription.url' "$SUB_URL"
 echo "[+] URL подписки сохранён"
@@ -638,10 +686,6 @@ else
 	SHA_FILE="$STATE_DIR/xray.zip.sha256sum"
 	DGST_FILE="$STATE_DIR/xray.dgst"
 
-	extract_sha256() {
-		awk -F '= ' '/^SHA2-256/{print $2}' "$1" | tr -d ' \n'
-	}
-
 	echo "  → Скачиваем .dgst для Xray..."
 	download_file "${ZIP_URL}.dgst" "$DGST_FILE" || {
 		echo "  [X] Не удалось скачать .dgst"
@@ -686,18 +730,6 @@ fi
 # ============================================
 echo "=== Шаг 5: Загрузка скриптов ==="
 
-download_script() {
-	local url="$1"
-	local dst="$2"
-	if download_file "$url" "$dst"; then
-		chmod +x "$dst"
-		echo "  → $dst"
-	else
-		echo "  [X] Ошибка: не удалось скачать $dst"
-		exit 1
-	fi
-}
-
 download_script "$REPO/xray-generate-config.py" "$GENERATOR"
 download_script "$REPO/xray-sub-parser.py" "$PARSER"
 download_script "$REPO/update-xray.sh" "$UPDATER"
@@ -709,44 +741,6 @@ echo "[+] Все скрипты загружены"
 #   6. Геофайлы + HWID + config.json
 # ============================================
 echo "=== Шаг 6: Геофайлы, HWID, config.json ==="
-
-update_geo() {
-	local URL="$1"
-	local DEST="$2"
-	local BASE="$(basename "$DEST")"
-	local TMP="/tmp/$BASE.tmp"
-	local TMP_SHA="/tmp/$BASE.sha256"
-	local SHA_FILE="${STATE_DIR}/${BASE}.sha256sum"
-
-	echo "  → $BASE"
-	download_file "${URL}.sha256sum" "$TMP_SHA" || {
-		echo "  [X] Не удалось получить SHA256 для $BASE"
-		exit 1
-	}
-	REMOTE_SHA="$(cut -d' ' -f1 "$TMP_SHA")"
-	[ -z "$REMOTE_SHA" ] && { echo "  [X] Пустой SHA256 для $BASE"; exit 1; }
-
-	# Проверяем, не тот же ли уже файл
-	if [ -f "$SHA_FILE" ] && [ "$(cat "$SHA_FILE")" = "$REMOTE_SHA" ] && [ -f "$DEST" ]; then
-		echo "  ✓ $BASE не изменился"
-		rm -f "$TMP_SHA"
-		return
-	fi
-
-	download_file "$URL" "$TMP" || {
-		echo "  [X] Не удалось скачать $BASE"
-		exit 1
-	}
-	LOCAL_SHA="$(sha256sum "$TMP" | awk '{print $1}')"
-	if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
-		echo "  [X] SHA не совпадает для $BASE"
-		rm -f "$TMP" "$TMP_SHA"
-		exit 1
-	fi
-	mv "$TMP" "$DEST"
-	echo "$REMOTE_SHA" >"$SHA_FILE"
-	echo "  ✓ $BASE готов"
-}
 
 GEO_DIR="$(settings_get '.geodata.dir')"
 GEOIP_URL="$(settings_get '.geodata.geoip_url')"

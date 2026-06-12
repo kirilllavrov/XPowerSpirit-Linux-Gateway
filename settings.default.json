@@ -8,7 +8,6 @@
   "device_model": "",
   "device_os": "",
   "ver_os": "",
-  "repo": "https://raw.githubusercontent.com/kirilllavrov/XPowerSpirit-Linux-Gateway/main",
   "network": {
     "interface": "",
     "ip": "",
