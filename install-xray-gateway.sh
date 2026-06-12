@@ -1,5 +1,5 @@
 #!/bin/bash
-# DietPi (Debian ARM) — Xray Transparent Gateway (IPv4-only)
+# Ubuntu/Debian ARM — Xray Transparent Gateway (IPv4-only)
 #
 # Прозрачный шлюз: устройство НЕ основной роутер.
 # Основной роутер (Роутер) раздаёт DHCP, NAT, интернет.
@@ -626,7 +626,7 @@ if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
 	echo "nameserver 127.0.0.1" >/etc/resolv.conf
 	echo "  → systemd-resolved отключён, DNS через dnsmasq (127.0.0.1:53)"
 else
-	# На всякий случай: если resolv.conf指向 внешний DNS — переключаем на локальный
+	# На всякий случай: если resolv.conf внешний DNS — переключаем на локальный
 	if ! grep -q "^nameserver 127.0.0.1" /etc/resolv.conf 2>/dev/null; then
 		echo "nameserver 127.0.0.1" >/etc/resolv.conf
 		echo "  → resolv.conf переключён на 127.0.0.1"
@@ -687,7 +687,7 @@ else
 	aarch64) MACHINE="arm64-v8a" ;;
 	armv7l) MACHINE="arm32-v7a" ;;
 	armv6l) MACHINE="arm32-v6" ;;
-	*) MACHINE="arm64-v8a" ;; # DietPi обычно arm64
+	*) MACHINE="arm64-v8a" ;;
 	esac
 
 	ZIP_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST_VERSION}/Xray-linux-${MACHINE}.zip"
