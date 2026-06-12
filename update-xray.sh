@@ -108,6 +108,11 @@ if [ "$FREE_SPACE_ROOT" -lt 10240 ]; then
 	die "Недостаточно места в / (нужно минимум 10MB, доступно ${FREE_SPACE_ROOT}KB)"
 fi
 
+# Проверка/создание группы xray (нужна для GID-bypass в nftables)
+if ! getent group xray >/dev/null 2>&1; then
+	groupadd -r -g 990 xray 2>/dev/null || true
+fi
+
 # ============================
 #   HWID + подписка + настройки
 # ============================

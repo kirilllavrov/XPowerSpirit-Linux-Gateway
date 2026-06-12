@@ -718,6 +718,25 @@ else
 fi
 
 # ============================================
+#   7.5. Создаём группу xray для GID-bypass в nftables
+# ============================================
+echo "=== Шаг 7.5: Группа xray (GID=$XRAY_GID) ==="
+
+XRAY_GID=990
+if ! getent group xray >/dev/null 2>&1; then
+	groupadd -r -g "$XRAY_GID" xray
+	echo "  → Группа xray создана (gid=$XRAY_GID)"
+else
+	echo "  → Группа xray уже существует (gid=$(getent group xray | cut -d: -f3))"
+	# Если gid не 990, обновляем
+	current_gid=$(getent group xray | cut -d: -f3)
+	if [ "$current_gid" != "$XRAY_GID" ]; then
+		groupmod -g "$XRAY_GID" xray
+		echo "  → GID группы xray изменён: $current_gid → $XRAY_GID"
+	fi
+fi
+
+# ============================================
 #   8. Создаём systemd-сервис для Xray
 # ============================================
 echo "=== Шаг 8: Systemd-сервис для Xray ==="
@@ -732,6 +751,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
+Group=xray
+SupplementaryGroups=xray
 ExecStartPre=/bin/sh -c '\
   while ! ip route | grep -q default; do sleep 2; done; \
   ip -4 addr show eth0 2>/dev/null | grep "inet " | awk "{print \$2}" | cut -d/ -f1 > /etc/xray/gateway_ip 2>/dev/null || true; \
