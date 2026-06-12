@@ -108,7 +108,7 @@ SETTINGS_JSON="$CONFIG_DIR/settings.json"
 TMP_DIR="/tmp/xray_install"
 GEO_DIR="/usr/local/share/xray"
 STATE_DIR="/etc/xray/state"
-SUB_USER_AGENT="DietPi-Xray/1.0"
+SUB_USER_AGENT="XPower/1.0"
 
 # ============================================
 #   HELPER: чтение/запись settings.json
