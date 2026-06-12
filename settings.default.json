@@ -26,5 +26,39 @@
     "dir": "/usr/local/share/xray",
     "geoip_url": "https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat",
     "geosite_url": "https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat"
+  },
+  "routing": {
+    "direct": {
+      "domains": [
+        "geosite:private",
+        "geosite:category-browser",
+        "geosite:category-cdn-ru",
+        "geosite:category-mobile",
+        "geosite:category-ru"
+      ],
+      "ips": [
+        "geoip:ru",
+        "geoip:private"
+      ]
+    },
+    "block": {
+      "domains": [
+        "geosite:category-ads"
+      ]
+    },
+    "proxy": {
+      "domains": [
+        "geosite:category-streaming",
+        "geosite:category-games"
+      ]
+    },
+    "doh_bypass": [
+      "common.dot.dns.yandex.net",
+      "cloudflare-dns.com",
+      "dns.google",
+      "dns.quad9.net",
+      "doh.opendns.com",
+      "dns.nextdns.io"
+    ]
   }
 }

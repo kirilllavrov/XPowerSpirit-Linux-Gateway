@@ -33,6 +33,11 @@ def load_settings() -> dict:
     except Exception:
         return {}
 
+def load_routing() -> dict:
+    """Загружает routing-категории из settings.json"""
+    s = load_settings()
+    return s.get("routing", {})
+
 def _load_domain_whitelist() -> list:
     """Загружает whitelist из settings.json (dns.dwl_domain)"""
     whitelist = []
@@ -348,6 +353,7 @@ def base_config() -> dict:
 def build_direct_config() -> dict:
     """Создаёт DIRECT-конфиг (без прокси) для режима 'hole'"""
     cfg = base_config()
+    rt = load_routing()
     cfg["outbounds"] = [
         {"protocol": "freedom", "tag": "direct", "settings": {"domainStrategy": "UseIPv4"}},
         {"protocol": "blackhole", "tag": "block", "settings": {"response": {"type": "http"}}},
@@ -380,35 +386,22 @@ def build_direct_config() -> dict:
             },
             {
                 "type": "field",
-                "domain": [
-                    "common.dot.dns.yandex.net",
-                    "cloudflare-dns.com",
-                    "dns.google",
-                    "dns.quad9.net",
-                    "doh.opendns.com",
-                    "dns.nextdns.io"
-                ],
+                "domain": rt["doh_bypass"],
                 "outboundTag": "direct"
             },
             {
                 "type": "field",
-                "domain": ["geosite:category-ads"],
+                "domain": rt["block"]["domains"],
                 "outboundTag": "block"
             },
             {
                 "type": "field",
-                "ip": ["geoip:ru", "geoip:private"],
+                "ip": rt["direct"]["ips"],
                 "outboundTag": "direct"
             },
             {
                 "type": "field",
-                "domain": [
-                    "geosite:private",
-                    "geosite:category-browser",
-                    "geosite:category-cdn-ru",
-                    "geosite:category-mobile",
-                    "geosite:category-ru"
-                ],
+                "domain": rt["direct"]["domains"],
                 "outboundTag": "direct"
             },
             {
@@ -443,6 +436,7 @@ def build_rules(proxy_outbounds: list, direct_mode: bool = False) -> list:
     Если несколько прокси, использует балансировщик.
     Если один прокси, использует прямой outboundTag.
     """
+    rt = load_routing()
     rules = [
         # DNS inbound (принимает на IP шлюза:53) → dns-out (hijack → dns-inbuilt)
         {
@@ -460,20 +454,13 @@ def build_rules(proxy_outbounds: list, direct_mode: bool = False) -> list:
         # Ловим прямой DoH от браузеров — отправляем напрямую (уже зашифрован)
         {
             "type": "field",
-            "domain": [
-                "common.dot.dns.yandex.net",
-                "cloudflare-dns.com",
-                "dns.google",
-                "dns.quad9.net",
-                "doh.opendns.com",
-                "dns.nextdns.io"
-            ],
+            "domain": rt["doh_bypass"],
             "outboundTag": "direct"
         },
         # Блокировка рекламы
         {
             "type": "field",
-            "domain": ["geosite:category-ads"],
+            "domain": rt["block"]["domains"],
             "outboundTag": "block"
         },
         # NTP (порт 123) — напрямую
@@ -493,19 +480,13 @@ def build_rules(proxy_outbounds: list, direct_mode: bool = False) -> list:
         # Локальные и российские IP — напрямую
         {
             "type": "field",
-            "ip": ["geoip:ru", "geoip:private"],
+            "ip": rt["direct"]["ips"],
             "outboundTag": "direct"
         },
         # Локальные и российские домены — напрямую
         {
             "type": "field",
-            "domain": [
-                "geosite:private",
-                "geosite:category-browser",
-                "geosite:category-cdn-ru",
-                "geosite:category-mobile",
-                "geosite:category-ru"
-            ],
+            "domain": rt["direct"]["domains"],
             "outboundTag": "direct"
         },
     ]
@@ -516,7 +497,7 @@ def build_rules(proxy_outbounds: list, direct_mode: bool = False) -> list:
         # Стриминг и игры — через прокси
         rules.append({
             "type": "field",
-            "domain": ["geosite:category-streaming", "geosite:category-games"],
+            "domain": rt["proxy"]["domains"],
             "balancerTag" if len(proxy_outbounds) > 1 else "outboundTag": target
         })
 

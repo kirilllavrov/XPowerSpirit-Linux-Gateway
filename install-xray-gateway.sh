@@ -386,7 +386,8 @@ cfg={
     'network':{'interface':'','ip':'','mask':'$LAN_MASK','gateway':''},
     'xray':{'gid':990,'tproxy_port':12345,'tproxy_mark':1,'bypass_mark':2},
     'dns':{'servers':'77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0','local_tcp_ports':'8090','dwl_domain':''},
-    'geodata':{'dir':'/usr/local/share/xray','geoip_url':'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat','geosite_url':'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat'}
+    'geodata':{'dir':'/usr/local/share/xray','geoip_url':'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat','geosite_url':'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat'},
+    'routing':{'direct':{'domains':['geosite:private','geosite:category-browser','geosite:category-cdn-ru','geosite:category-mobile','geosite:category-ru'],'ips':['geoip:ru','geoip:private']},'block':{'domains':['geosite:category-ads']},'proxy':{'domains':['geosite:category-streaming','geosite:category-games']},'doh_bypass':['common.dot.dns.yandex.net','cloudflare-dns.com','dns.google','dns.quad9.net','doh.opendns.com','dns.nextdns.io']}
 }
 json.dump(cfg,open('$SETTINGS_JSON','w'),indent=2,ensure_ascii=False)
 "
