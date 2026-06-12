@@ -5,6 +5,9 @@
     "remarks": ""
   },
   "hwid": "",
+  "device_model": "",
+  "device_os": "",
+  "ver_os": "",
   "network": {
     "interface": "",
     "ip": "",

@@ -383,6 +383,7 @@ import json
 cfg={
     'subscription':{'url':'','user_agent':'$SUB_USER_AGENT','remarks':''},
     'hwid':'',
+    'device_model':'$DEVICE_MODEL','device_os':'$DEVICE_OS','ver_os':'$VER_OS',
     'network':{'interface':'','ip':'','mask':'$LAN_MASK','gateway':''},
     'xray':{'gid':990,'tproxy_port':12345,'tproxy_mark':1,'bypass_mark':2},
     'dns':{'servers':'77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0','local_tcp_ports':'8090','dwl_domain':''},
@@ -406,6 +407,26 @@ if [ -n "$REMARKS_FILTER" ]; then
 else
 	settings_set '.subscription.remarks' ''
 fi
+
+# Определяем и сохраняем информацию об устройстве
+DEVICE_MODEL=""
+VER_OS=""
+DEVICE_OS="$(lsb_release -is 2>/dev/null || grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"')"
+[ -z "$DEVICE_OS" ] && DEVICE_OS="Debian"
+
+if [ -f /boot/dietpi/.hw_model ]; then
+	source /boot/dietpi/.hw_model
+	DEVICE_MODEL="${G_HW_MODEL_NAME:-}"
+	VER_OS="${G_DISTRO_NAME:-}"
+	DEVICE_OS="DietPi"
+fi
+[ -z "$DEVICE_MODEL" ] && DEVICE_MODEL="$(cat /proc/device-tree/model 2>/dev/null || cat /sys/class/dmi/id/product_name 2>/dev/null || uname -m)"
+[ -z "$VER_OS" ] && VER_OS="$(cat /etc/debian_version 2>/dev/null || lsb_release -rs 2>/dev/null)"
+
+settings_set '.device_model' "$DEVICE_MODEL"
+settings_set '.device_os' "$DEVICE_OS"
+settings_set '.ver_os' "$VER_OS"
+echo "[+] Устройство: $DEVICE_MODEL / $DEVICE_OS $VER_OS"
 
 # Сохраняем сетевые параметры
 settings_set '.network.interface' "$LAN_IF"
