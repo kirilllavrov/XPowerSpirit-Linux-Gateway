@@ -23,20 +23,23 @@ import argparse
 #   КОНФИГУРАЦИЯ
 # ============================================
 
-# Whitelist доменов для VLESS-подписок (из /etc/xray/dwl_domain)
-# Используется только в choose_best_server() для VLESS-формата.
-# В unified/json форматах не применяется — там балансировщик.
-def _load_domain_whitelist() -> list:
-    """Загружает whitelist из /etc/xray/dwl_domain (только для VLESS Base64 подписок)"""
-    whitelist = []
+SETTINGS_PATH = "/etc/xray/settings.json"
+
+def load_settings() -> dict:
+    """Загружает settings.json или возвращает умолчания"""
     try:
-        with open("/etc/xray/dwl_domain", "r") as f:
-            for line in f:
-                domain = line.strip()
-                if domain and not domain.startswith("#"):
-                    whitelist.append(domain)
-    except FileNotFoundError:
-        pass
+        with open(SETTINGS_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _load_domain_whitelist() -> list:
+    """Загружает whitelist из settings.json (dns.dwl_domain)"""
+    whitelist = []
+    s = load_settings()
+    dwl = s.get("dns", {}).get("dwl_domain", "")
+    if dwl:
+        whitelist.append(dwl)
     return whitelist
 
 DOMAIN_WHITELIST = _load_domain_whitelist()
@@ -268,6 +271,9 @@ def normalize_vless_outbound(ob: dict, chosen_tag: str) -> dict:
 
 def base_config() -> dict:
     """Возвращает базовую конфигурацию Xray с TProxy и DNS"""
+    s = load_settings()
+    tproxy_port = s.get("xray", {}).get("tproxy_port", 12345)
+
     return {
         "log": {
             "loglevel": "none",
@@ -309,7 +315,7 @@ def base_config() -> dict:
             {
                 "tag": "tproxy-in",
                 "listen": "0.0.0.0",
-                "port": 12345,
+                "port": tproxy_port,
                 "protocol": "dokodemo-door",
                 "settings": {
                     "network": "tcp,udp",

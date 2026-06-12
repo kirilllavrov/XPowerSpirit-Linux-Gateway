@@ -55,11 +55,15 @@ fetch_url() {
 }
 
 CONFIG_DIR="/etc/xray"
-SUB_FILE="$CONFIG_DIR/subscription.url"
 CONFIG_JSON="$CONFIG_DIR/config.json"
-HWID_FILE="$CONFIG_DIR/hwid"
-SUB_USER_AGENT_FILE="$CONFIG_DIR/sub_user_agent"
-SUB_REMARKS_FILE="$CONFIG_DIR/sub_remarks"
+SETTINGS_JSON="$CONFIG_DIR/settings.json"
+
+# ============================================
+#   HELPER: чтение settings.json
+# ============================================
+settings_get() {
+	python3 -c "import json; cfg=json.load(open('$SETTINGS_JSON')); print(cfg${1} if ${1} else '')" 2>/dev/null || true
+}
 
 STATE_DIR="/etc/xray/state"
 TMP_DIR="/tmp/xray_update"
@@ -117,27 +121,22 @@ fi
 #   HWID + подписка + настройки
 # ============================
 
-[ -f "$HWID_FILE" ] || die "Нет HWID (файл $HWID_FILE)"
-HWID="$(cat "$HWID_FILE" | tr -d '\n\r')"
-[ -z "$HWID" ] && die "HWID пуст"
+# Читаем HWID из settings.json
+HWID="$(settings_get '.hwid')"
+[ -z "$HWID" ] && die "Нет HWID в settings.json"
 
-[ -f "$SUB_FILE" ] || die "Нет subscription.url (файл $SUB_FILE)"
-SUB_URL="$(cat "$SUB_FILE" | tr -d '\n\r')"
-[ -z "$SUB_URL" ] && die "Пустой URL подписки"
+# Читаем URL подписки из settings.json
+SUB_URL="$(settings_get '.subscription.url')"
+[ -z "$SUB_URL" ] && die "Нет URL подписки в settings.json"
 
-# Читаем User-Agent для подписки
-SUB_USER_AGENT="DietPi-Xray/1.0"
-if [ -f "$SUB_USER_AGENT_FILE" ]; then
-	SUB_USER_AGENT="$(cat "$SUB_USER_AGENT_FILE" | tr -d '\n\r')"
-fi
+# Читаем User-Agent из settings.json
+SUB_USER_AGENT="$(settings_get '.subscription.user_agent')"
+[ -z "$SUB_USER_AGENT" ] && SUB_USER_AGENT="DietPi-Xray/1.0"
 echo "→ User-Agent: $SUB_USER_AGENT" >>"$LOG"
 
-# Читаем фильтр remarks для JSON-формата
-REMARKS_FILTER=""
-if [ -f "$SUB_REMARKS_FILE" ]; then
-	REMARKS_FILTER="$(cat "$SUB_REMARKS_FILE" | tr -d '\n\r')"
-	echo "→ Фильтр remarks: $REMARKS_FILTER" >>"$LOG"
-fi
+# Читаем фильтр remarks из settings.json
+REMARKS_FILTER="$(settings_get '.subscription.remarks')"
+[ -n "$REMARKS_FILTER" ] && echo "→ Фильтр remarks: $REMARKS_FILTER" >>"$LOG"
 
 # ============================
 #   Обновление Xray
@@ -275,6 +274,11 @@ echo "→ Обновление скриптов..." >>"$LOG"
 for scr in xray-generate-config.py xray-sub-parser.py update-nft.sh; do
 	fetch_url "$REPO/$scr" "/tmp/${scr}" && mv "/tmp/${scr}" "/usr/local/share/xray/${scr}" && chmod +x "/usr/local/share/xray/${scr}" 2>/dev/null
 done
+
+# Обновляем settings.default.json (только если settings.json отсутствует)
+if [ ! -f "$SETTINGS_JSON" ]; then
+	fetch_url "$REPO/settings.default.json" "$SETTINGS_JSON" 2>/dev/null || true
+fi
 echo "→ Скрипты обновлены" >>"$LOG"
 
 # ============================

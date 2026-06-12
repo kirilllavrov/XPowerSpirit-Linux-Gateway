@@ -15,23 +15,48 @@
 set -e
 
 # ============================================
-#   КОНФИГУРАЦИЯ
+#   КОНФИГУРАЦИЯ (умолчания)
 # ============================================
 XRAY_GID=990
 TPROXY_PORT=12345
 TPROXY_MARK=1
 BYPASS_MARK=2
 TABLE_NAME="inet xray"
+SETTINGS_JSON="/etc/xray/settings.json"
 
 # Порты локальных сервисов на шлюзе, доступных клиентам (TorrServer и др.)
-# Трафик на эти порты шлюза не будет перехватываться TProxy
 LOCAL_TCP_PORTS="8090"
 
 # DoH/DNS серверы (должны совпадать с hosts в xray-generate-config.py)
-# Используются для:
-#   - bypass не-DNS трафика к этим IP (PREROUTING)
-#   - разрешения DoH-запросов от встроенного DNS Xray (OUTPUT)
 DNS_IPS="77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0"
+
+# ============================================
+#   HELPER: чтение settings.json
+# ============================================
+settings_get() {
+	python3 -c "import json; cfg=json.load(open('$SETTINGS_JSON')); print(cfg${1} if ${1} else '')" 2>/dev/null || true
+}
+
+# Читаем настройки из settings.json (если есть), иначе умолчания
+if [ -f "$SETTINGS_JSON" ]; then
+	_gid=$(settings_get '.xray.gid')
+	[ -n "$_gid" ] && XRAY_GID="$_gid"
+
+	_tport=$(settings_get '.xray.tproxy_port')
+	[ -n "$_tport" ] && TPROXY_PORT="$_tport"
+
+	_tmark=$(settings_get '.xray.tproxy_mark')
+	[ -n "$_tmark" ] && TPROXY_MARK="$_tmark"
+
+	_bmark=$(settings_get '.xray.bypass_mark')
+	[ -n "$_bmark" ] && BYPASS_MARK="$_bmark"
+
+	_dns=$(settings_get '.dns.servers')
+	[ -n "$_dns" ] && DNS_IPS="$_dns"
+
+	_ports=$(settings_get '.dns.local_tcp_ports')
+	[ -n "$_ports" ] && LOCAL_TCP_PORTS="$_ports"
+fi
 
 # ============================================
 #   АВТООПРЕДЕЛЕНИЕ LAN

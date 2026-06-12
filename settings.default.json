@@ -1,0 +1,25 @@
+{
+  "subscription": {
+    "url": "",
+    "user_agent": "XPower/1.0",
+    "remarks": ""
+  },
+  "hwid": "",
+  "network": {
+    "interface": "",
+    "ip": "",
+    "mask": "255.255.255.0",
+    "gateway": ""
+  },
+  "xray": {
+    "gid": 990,
+    "tproxy_port": 12345,
+    "tproxy_mark": 1,
+    "bypass_mark": 2
+  },
+  "dns": {
+    "servers": "77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0",
+    "local_tcp_ports": "8090",
+    "dwl_domain": ""
+  }
+}

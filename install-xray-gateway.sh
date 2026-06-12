@@ -104,12 +104,32 @@ UPDATER="/usr/local/share/xray/update-xray.sh"
 NFT_UPDATER="/usr/local/share/xray/update-nft.sh"
 CONFIG_DIR="/etc/xray"
 CONFIG_JSON="$CONFIG_DIR/config.json"
-SUB_FILE="$CONFIG_DIR/subscription.url"
-HWID_FILE="$CONFIG_DIR/hwid"
+SETTINGS_JSON="$CONFIG_DIR/settings.json"
 TMP_DIR="/tmp/xray_install"
 GEO_DIR="/usr/local/share/xray"
 STATE_DIR="/etc/xray/state"
 SUB_USER_AGENT="DietPi-Xray/1.0"
+
+# ============================================
+#   HELPER: чтение/запись settings.json
+# ============================================
+settings_get() {
+	python3 -c "import json; cfg=json.load(open('$SETTINGS_JSON')); print(cfg${1} if ${1} else '')" 2>/dev/null || true
+}
+
+settings_set() {
+	local key="$1" val="$2"
+	python3 -c "
+import json
+cfg=json.load(open('$SETTINGS_JSON'))
+keys='${key}'.lstrip('.').split('.')
+ptr=cfg
+for k in keys[:-1]:
+    ptr=ptr.setdefault(k,{})
+ptr[keys[-1]]='${val}'
+json.dump(cfg,open('$SETTINGS_JSON','w'),indent=2,ensure_ascii=False)
+" 2>/dev/null || true
+}
 
 # Сетевые параметры
 LAN_IF=""
@@ -349,21 +369,55 @@ echo "    Подписка  : $SUB_URL"
 echo ""
 
 # ============================================
-#   2. Сохраняем подписку и User-Agent
+#   2. Сохраняем настройки в settings.json
 # ============================================
-echo "=== Шаг 2: Сохранение подписки ==="
-echo "$SUB_URL" >"$SUB_FILE"
-chmod 600 "$SUB_FILE"
-echo "[+] Подписка сохранена"
+echo "=== Шаг 2: Сохранение настроек ==="
 
-echo "$SUB_USER_AGENT" > "$CONFIG_DIR/sub_user_agent"
+# Скачиваем settings.default.json как основу
+echo "  → Загружаю settings.default.json..."
+if [ ! -f "$SETTINGS_JSON" ]; then
+	download_file "$REPO/settings.default.json" "$SETTINGS_JSON" || {
+		echo "  [!] Не удалось скачать settings.default.json — создаю локально"
+		python3 -c "
+import json
+cfg={
+    'subscription':{'url':'','user_agent':'$SUB_USER_AGENT','remarks':''},
+    'hwid':'',
+    'network':{'interface':'','ip':'','mask':'$LAN_MASK','gateway':''},
+    'xray':{'gid':990,'tproxy_port':12345,'tproxy_mark':1,'bypass_mark':2},
+    'dns':{'servers':'77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0','local_tcp_ports':'8090','dwl_domain':''}
+}
+json.dump(cfg,open('$SETTINGS_JSON','w'),indent=2,ensure_ascii=False)
+"
+	}
+fi
+
+settings_set '.subscription.url' "$SUB_URL"
+echo "[+] URL подписки сохранён"
+
+settings_set '.subscription.user_agent' "$SUB_USER_AGENT"
 echo "[+] User-Agent: $SUB_USER_AGENT"
 
 if [ -n "$REMARKS_FILTER" ]; then
-	echo "$REMARKS_FILTER" > "$CONFIG_DIR/sub_remarks"
+	settings_set '.subscription.remarks' "$REMARKS_FILTER"
 	echo "[+] Фильтр remarks: $REMARKS_FILTER"
 else
-	rm -f "$CONFIG_DIR/sub_remarks"
+	settings_set '.subscription.remarks' ''
+fi
+
+# Сохраняем сетевые параметры
+settings_set '.network.interface' "$LAN_IF"
+settings_set '.network.ip' "$LAN_IP"
+settings_set '.network.mask' "$LAN_MASK"
+settings_set '.network.gateway' "$GATEWAY_IP"
+echo "[+] Сетевые параметры сохранены"
+
+# Сохраняем приоритетный домен
+if [ -n "$DWL_DOMAIN" ]; then
+	settings_set '.dns.dwl_domain' "$DWL_DOMAIN"
+	echo "[+] Приоритетный домен: $DWL_DOMAIN"
+else
+	settings_set '.dns.dwl_domain' ''
 fi
 
 # ============================================
@@ -596,18 +650,12 @@ download_script "$REPO/xray-sub-parser.py" "$PARSER"
 download_script "$REPO/update-xray.sh" "$UPDATER"
 download_script "$REPO/update-nft.sh" "$NFT_UPDATER"
 
-echo "[+] Все скрипты загружены"
-
-# Сохраняем IP шлюза — генератору нужен для dns-in inbound
-echo "$LAN_IP" > "$CONFIG_DIR/gateway_ip"
-
-# Сохраняем приоритетный домен в файл (генератор читает его при каждом запуске)
-if [ -n "$DWL_DOMAIN" ]; then
-	echo "$DWL_DOMAIN" > "$CONFIG_DIR/dwl_domain"
-	echo "  → Приоритетный домен сохранён: $DWL_DOMAIN"
-else
-	rm -f "$CONFIG_DIR/dwl_domain"
+# Скачиваем settings.default.json (если settings.json ещё нет)
+if [ ! -f "$SETTINGS_JSON" ]; then
+	download_file "$REPO/settings.default.json" "$SETTINGS_JSON" || true
 fi
+
+echo "[+] Все скрипты загружены"
 
 # ============================================
 #   6. Геофайлы + HWID + config.json
@@ -663,8 +711,7 @@ update_geo \
 # HWID
 echo "  → Генерируем HWID..."
 HWID="$(cat /proc/sys/kernel/random/uuid | tr -d '-')"
-echo "$HWID" >"$HWID_FILE"
-chmod 600 "$HWID_FILE"
+settings_set '.hwid' "$HWID"
 echo "  ✓ HWID: $HWID"
 
 # Генерация config.json
