@@ -499,7 +499,7 @@ if [ -f /boot/dietpi/.hw_model ]; then
 	VER_OS="${G_DISTRO_NAME:-}"
 	DEVICE_OS="DietPi"
 fi
-[ -z "$DEVICE_MODEL" ] && DEVICE_MODEL="$(cat /proc/device-tree/model 2>/dev/null || cat /sys/class/dmi/id/product_name 2>/dev/null || uname -m)"
+[ -z "$DEVICE_MODEL" ] && DEVICE_MODEL="$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0' || cat /sys/class/dmi/id/product_name 2>/dev/null || uname -m)"
 [ -z "$VER_OS" ] && VER_OS="$(cat /etc/debian_version 2>/dev/null || lsb_release -rs 2>/dev/null)"
 
 settings_set '.device_model' "$DEVICE_MODEL"
@@ -757,6 +757,9 @@ echo "=== Шаг 6: Геофайлы, HWID, config.json ==="
 GEO_DIR="$(settings_get '.geodata.dir')"
 GEOIP_URL="$(settings_get '.geodata.geoip_url')"
 GEOSITE_URL="$(settings_get '.geodata.geosite_url')"
+
+echo "  geoip  : $GEOIP_URL"
+echo "  geosite: $GEOSITE_URL"
 
 update_geo "$GEOIP_URL" "$GEO_DIR/geoip.dat"
 update_geo "$GEOSITE_URL" "$GEO_DIR/geosite.dat"
