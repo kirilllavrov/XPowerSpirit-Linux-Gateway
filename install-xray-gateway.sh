@@ -43,7 +43,7 @@ echo ""
 echo "=== Проверка зависимостей ==="
 
 # Проверяем и устанавливаем необходимые пакеты
-REQUIRED_PACKAGES="curl python3 unzip nftables"
+REQUIRED_PACKAGES="curl python3 unzip nftables iproute2"
 MISSING=""
 
 for pkg in $REQUIRED_PACKAGES; do
@@ -146,16 +146,19 @@ DWL_DOMAIN=""
 detect_network() {
 	echo "  [1/3] Определяю сетевой интерфейс..."
 
-	# Ищем Ethernet-интерфейс (не loopback, не docker, не wg, не tun)
-	LAN_IF=$(ip -4 addr show | grep -v 'lo\|docker\|virbr\|wg\|tun\|veth' | grep 'inet ' | grep -E 'eth[0-9]|enp|ens|end' | head -1 | awk '{print $NF}')
-
-	if [ -z "$LAN_IF" ]; then
-		# Fallback: любой не-loopback интерфейс с IP
-		LAN_IF=$(ip -4 addr show | grep -v 'lo\|docker\|virbr\|wg\|tun\|veth' | grep 'inet ' | head -1 | awk '{print $NF}')
-	fi
+	# ip -o даёт по одной строке на адрес: <idx>: <ifname>    inet <cidr> ...
+	# Имя интерфейса ВСЕГДА во втором поле.
+	# Фильтруем по началу имени: lo, docker*, virbr*, wg*, tun*, veth*, br-*
+	LAN_IF=$(ip -o -4 addr show 2>/dev/null | \
+		awk '{print $2}' | \
+		grep -vE '^(lo|docker|virbr|wg|tun|veth|br-)' | \
+		head -1)
 
 	[ -z "$LAN_IF" ] && {
 		echo "[X] Не удалось определить сетевой интерфейс"
+		echo "    Вывод ip -4 addr show:"
+		ip -4 addr show 2>&1 || true
+		echo "    Проверьте наличие активного Ethernet-интерфейса."
 		exit 1
 	}
 	echo "    Интерфейс: $LAN_IF"
