@@ -1,5 +1,5 @@
 #!/bin/bash
-# DietPi (Debian ARM) — nftables правила для Xray Transparent Gateway
+# Ubuntu/Debian ARM — nftables правила для Xray Transparent Gateway
 #
 # Режим: прозрачный шлюз (не основной роутер).
 # Трафик клиентов с LAN + собственный трафик шлюза проксируются через Xray TProxy.

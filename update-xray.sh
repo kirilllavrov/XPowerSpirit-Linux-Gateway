@@ -1,5 +1,5 @@
 #!/bin/bash
-# DietPi (Debian ARM) — обновление Xray, geoip, geosite, подписки и config.json
+# Ubuntu/Debian ARM — обновление Xray, geoip, geosite, подписки и config.json
 # Работает в режиме прозрачного шлюза
 # Поддерживает два формата подписки:
 #   - Base64 (VLESS URI)
