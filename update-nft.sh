@@ -89,7 +89,7 @@ cleanup_rules() {
 
 	# Убираем policy routing
 	while ip rule del fwmark "$TPROXY_MARK" table 100 2>/dev/null; do :; done
-	ip route flush table 100 2>/dev/null
+	ip route flush table 100 2>/dev/null || true
 
 	# Сбрасываем IPv6 route localnet если был установлен
 	sysctl -w net.ipv6.conf.all.route_localnet=0 2>/dev/null || true
@@ -105,7 +105,7 @@ setup_network() {
 
 	# Очищаем предыдущие правила
 	while ip rule del fwmark "$TPROXY_MARK" table 100 2>/dev/null; do :; done
-	ip route flush table 100 2>/dev/null
+	ip route flush table 100 2>/dev/null || true
 
 	# Policy routing: пакеты с mark=1 → table 100 → lo (для TProxy)
 	ip rule add fwmark "$TPROXY_MARK" table 100
