@@ -814,21 +814,15 @@ fi
 # ============================================
 #   7.5. Создаём группу xray для GID-bypass в nftables
 # ============================================
-echo "=== Шаг 7.5: Группа xray (GID=$XRAY_GID) ==="
+echo "=== Шаг 7.5: Группа xray (GID=990) ==="
 
-XRAY_GID=990
-if ! getent group xray >/dev/null 2>&1; then
-	groupadd -r -g "$XRAY_GID" xray
-	echo "  → Группа xray создана (gid=$XRAY_GID)"
-else
-	echo "  → Группа xray уже существует (gid=$(getent group xray | cut -d: -f3))"
-	# Если gid не 990, обновляем
-	current_gid=$(getent group xray | cut -d: -f3)
-	if [ "$current_gid" != "$XRAY_GID" ]; then
-		groupmod -g "$XRAY_GID" xray
-		echo "  → GID группы xray изменён: $current_gid → $XRAY_GID"
-	fi
-fi
+# Создаём группу, если нет. Не фатально: если уже есть — ок.
+groupadd -r -g 990 xray 2>/dev/null || \
+	getent group xray >/dev/null 2>&1 || \
+	grep -q '^xray:' /etc/group 2>/dev/null || {
+		echo "  [!] Не удалось создать/найти группу xray"
+	}
+echo "  → Группа xray: gid=$(getent group xray 2>/dev/null | cut -d: -f3 || grep '^xray:' /etc/group | cut -d: -f3 || echo '?')"
 
 # ============================================
 #   8. Создаём systemd-сервис для Xray
