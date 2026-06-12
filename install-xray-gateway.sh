@@ -495,16 +495,15 @@ EOF
 	echo "  → Статический IP: $LAN_IP / $LAN_MASK, шлюз: $GATEWAY_IP"
 fi
 
-# Отключаем systemd-networkd если активен (DietPi может использовать его)
+# Отключаем systemd-networkd и NetworkManager (только disable, не stop — чтобы не рвать SSH)
+# Они будут отключены после перезагрузки; текущая сессия продолжает работать
 if systemctl is-active --quiet systemd-networkd 2>/dev/null; then
-	systemctl stop systemd-networkd 2>/dev/null || true
 	systemctl disable systemd-networkd 2>/dev/null || true
+	echo "  → systemd-networkd будет отключён после перезагрузки"
 fi
-
-# Отключаем NetworkManager если есть (мешает ручному управлению)
 if systemctl is-active --quiet NetworkManager 2>/dev/null; then
-	systemctl stop NetworkManager 2>/dev/null || true
 	systemctl disable NetworkManager 2>/dev/null || true
+	echo "  → NetworkManager будет отключён после перезагрузки"
 fi
 
 # Настраиваем dnsmasq как DNS-фронтенд (без DHCP)
@@ -546,13 +545,25 @@ DNSMASQ_EOF
 # Подставляем реальный интерфейс
 sed -i "s/LAN_IF_PLACEHOLDER/$LAN_IF/g" /etc/dnsmasq.conf
 
+# Перезапускаем dnsmasq с новым конфигом — ДО того как сломаем systemd-resolved
+systemctl restart dnsmasq 2>/dev/null || true
+echo "  → dnsmasq запущен на :53 → :5353"
+
 # Отключаем systemd-resolved чтобы освободить порт 53
+# ВАЖНО: dnsmasq УЖЕ слушает :53, поэтому переключение resolv.conf безопасно
 if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
 	systemctl stop systemd-resolved 2>/dev/null || true
 	systemctl disable systemd-resolved 2>/dev/null || true
 	# Удаляем симлинк /etc/resolv.conf → systemd-resolved stub
 	rm -f /etc/resolv.conf
 	echo "nameserver 127.0.0.1" > /etc/resolv.conf
+	echo "  → systemd-resolved отключён, DNS через dnsmasq (127.0.0.1:53)"
+else
+	# На всякий случай: если resolv.conf指向 внешний DNS — переключаем на локальный
+	if ! grep -q "^nameserver 127.0.0.1" /etc/resolv.conf 2>/dev/null; then
+		echo "nameserver 127.0.0.1" > /etc/resolv.conf
+		echo "  → resolv.conf переключён на 127.0.0.1"
+	fi
 fi
 
 echo "[+] Сетевая конфигурация сохранена (применится при перезагрузке)"
@@ -1012,3 +1023,48 @@ echo "============================================"
 
 echo ""
 echo "Лог установки: $LOG_FILE"
+echo ""
+
+# ============================================
+#   16. Перезагрузка
+# ============================================
+echo "=== Шаг 16: Перезагрузка ==="
+
+# Проверяем, интерактивный ли терминал
+if [ -t 0 ]; then
+	echo ""
+	echo "  ╔══════════════════════════════════════════════════╗"
+	echo "  ║  Для применения сетевых настроек нужна           ║"
+	echo "  ║  ПЕРЕЗАГРУЗКА.                                   ║"
+	echo "  ╚══════════════════════════════════════════════════╝"
+	echo ""
+
+	if [ "$USE_DHCP" != "1" ] && [ "$LAN_IP" != "$OLD_IP" ]; then
+		echo "  [!] IP изменится: $OLD_IP → $LAN_IP"
+		echo "  [!] После перезагрузки подключайтесь по НОВОМУ IP!"
+		echo ""
+	fi
+
+	echo "  Перезагрузить сейчас? [Y/n] (авто-перезагрузка через 30 сек)"
+	printf "  > "
+	read -r -t 30 REBOOT_CHOICE
+	REBOOT_CHOICE="${REBOOT_CHOICE:-Y}"
+
+	case "$REBOOT_CHOICE" in
+	[Yy]|[Yy][Ee][Ss]|"")
+		echo ""
+		echo "  Перезагрузка через 3 секунды..."
+		sleep 3
+		reboot
+		;;
+	*)
+		echo ""
+		echo "  [!] Перезагрузка отложена. Не забудьте перезагрузить вручную:"
+		echo "      reboot"
+		;;
+	esac
+else
+	# Неинтерактивный режим (pipe/curl | bash)
+	echo "  [!] Неинтерактивный режим — перезагрузка НЕ выполняется."
+	echo "  [!] Выполните reboot вручную для применения сетевых настроек."
+fi
