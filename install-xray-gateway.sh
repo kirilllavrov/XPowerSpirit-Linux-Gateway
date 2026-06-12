@@ -814,15 +814,19 @@ fi
 # ============================================
 #   7.5. Создаём группу xray для GID-bypass в nftables
 # ============================================
-echo "=== Шаг 7.5: Группа xray (GID=990) ==="
+echo "=== Шаг 7.5: Группа xray для GID-bypass ==="
 
-# Создаём группу, если нет. Не фатально: если уже есть — ок.
-groupadd -r -g 990 xray 2>/dev/null || \
-	getent group xray >/dev/null 2>&1 || \
-	grep -q '^xray:' /etc/group 2>/dev/null || {
-		echo "  [!] Не удалось создать/найти группу xray"
-	}
-echo "  → Группа xray: gid=$(getent group xray 2>/dev/null | cut -d: -f3 || grep '^xray:' /etc/group | cut -d: -f3 || echo '?')"
+# Создаём группу. Сначала пробуем GID 990, если занят — системный авто-gid.
+if ! getent group xray >/dev/null 2>&1 && ! grep -q '^xray:' /etc/group 2>/dev/null; then
+	groupadd -r -g 990 xray 2>/dev/null || groupadd -r xray 2>/dev/null || true
+fi
+XRAY_GID=$(getent group xray 2>/dev/null | cut -d: -f3 || grep '^xray:' /etc/group | cut -d: -f3)
+if [ -n "$XRAY_GID" ]; then
+	settings_set '.xray.gid' "$XRAY_GID"
+	echo "  → Группа xray: gid=$XRAY_GID"
+else
+	echo "  [!] Не удалось создать/найти группу xray — GID-bypass будет отключён"
+fi
 
 # ============================================
 #   8. Создаём systemd-сервис для Xray
@@ -883,6 +887,7 @@ echo "[+] systemd-сервис для Xray создан и включён"
 # ============================================
 echo "=== Шаг 9: Policy routing ==="
 
+mkdir -p /etc/iproute2
 if ! grep -q "^100[[:space:]]\+xray$" /etc/iproute2/rt_tables 2>/dev/null; then
 	echo "100 xray" >>/etc/iproute2/rt_tables
 fi
