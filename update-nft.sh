@@ -140,10 +140,13 @@ setup_network() {
 	nft add set "$TABLE_NAME" reserved_v4 { type ipv4_addr \; flags interval \; }
 	nft add element "$TABLE_NAME" reserved_v4 { 127.0.0.0/8 }
 	nft add element "$TABLE_NAME" reserved_v4 { 10.0.0.0/8 }
+	nft add element "$TABLE_NAME" reserved_v4 { 100.64.0.0/10 }
 	nft add element "$TABLE_NAME" reserved_v4 { 172.16.0.0/12 }
 	nft add element "$TABLE_NAME" reserved_v4 { 192.168.0.0/16 }
+	nft add element "$TABLE_NAME" reserved_v4 { 192.0.0.0/24 }
 	nft add element "$TABLE_NAME" reserved_v4 { 169.254.0.0/16 }
 	nft add element "$TABLE_NAME" reserved_v4 { 224.0.0.0/4 }
+	nft add element "$TABLE_NAME" reserved_v4 { 240.0.0.0/4 }
 	nft add element "$TABLE_NAME" reserved_v4 { 255.255.255.255 }
 
 	# ============================================
@@ -211,13 +214,13 @@ setup_network() {
 	#   ЦЕПОЧКА output_mark — маркировка
 	#   Маркирует исходящий трафик Xray для bypass в tproxy
 	# ============================================
-	nft add chain "$TABLE_NAME" output_mark { type filter hook output priority mangle \; policy accept \; }
+	nft add chain "$TABLE_NAME" output_mark { type route hook output priority mangle \; policy accept \; }
 
 	# 1. Трафик процессов группы xray → mark=BYPASS_MARK
 	#    Это основной механизм защиты от петель.
 	#    Xray должен запускаться с SupplementaryGroups=xray (gid 990).
 	if getent group "$XRAY_GID" >/dev/null 2>&1 || getent group xray >/dev/null 2>&1; then
-		nft add rule "$TABLE_NAME" output_mark meta skgid "$XRAY_GID" meta mark set "$BYPASS_MARK" accept
+		nft add rule "$TABLE_NAME" output_mark meta skgid "$XRAY_GID" meta mark set "$BYPASS_MARK" return
 		echo "  ✓ GID-bypass активен (skgid $XRAY_GID)"
 	else
 		echo "  [!] Группа xray (gid $XRAY_GID) не найдена — GID-bypass отключён"
