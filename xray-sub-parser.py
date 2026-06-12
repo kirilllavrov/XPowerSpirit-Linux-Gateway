@@ -117,6 +117,17 @@ def parse_extra_json(extra_raw: str):
 
 
 # -----------------------------
+# ПРОВЕРКА HOLE
+# -----------------------------
+def _check_hole(ob: dict) -> bool:
+    """Проверяет, является ли outbound сигналом 'hole' (окончание подписки)"""
+    try:
+        return ob.get("settings", {}).get("vnext", [{}])[0].get("address", "") == "hole"
+    except Exception:
+        return False
+
+
+# -----------------------------
 # ПАРСЕР VLESS
 # -----------------------------
 def parse_vless_uri(uri: str, idx: int):
@@ -267,6 +278,28 @@ def parse_vless_uri(uri: str, idx: int):
     }
 
 
+# -----------------------------
+# ПАРСЕР VLESS-СТРОК
+# -----------------------------
+def _parse_vless_lines(data: str) -> tuple:
+    """Парсит все vless:// URI из текста. Возвращает (outbounds, hole)."""
+    lines = [l.strip() for l in data.splitlines() if l.strip()]
+    outbounds = []
+    hole = False
+    idx = 0
+
+    for line in lines:
+        if line.startswith("vless://"):
+            ob = parse_vless_uri(line, idx)
+            if ob:
+                if _check_hole(ob):
+                    hole = True
+                outbounds.append(ob)
+                idx += 1
+
+    return outbounds, hole
+
+
 # ============================================
 #   УНИФИЦИРОВАННЫЙ РЕЖИМ (--ua)
 # ============================================
@@ -299,12 +332,9 @@ def parse_json_subscription(raw_data: str, remarks_filter: str = '') -> dict:
     hole = False
     for config in data:
         for ob in config.get("outbounds", []):
-            try:
-                addr = ob.get("settings", {}).get("vnext", [{}])[0].get("address", "")
-                if addr == "hole":
-                    hole = True
-            except Exception:
-                pass
+            if _check_hole(ob):
+                hole = True
+                break
 
     # Извлечение outbounds
     all_outbounds = []
@@ -388,30 +418,7 @@ def unified_main():
             print(json.dumps({"hole": False, "outbounds": []}))
             sys.exit(1)
 
-        if "vless://" not in data:
-            log_error("No vless:// URIs found in subscription")
-            print(json.dumps({"hole": False, "outbounds": []}))
-            sys.exit(1)
-
-        lines = [l.strip() for l in data.splitlines() if l.strip()]
-        outbounds = []
-        hole = False
-        idx = 0
-
-        for line in lines:
-            if line.startswith("vless://"):
-                ob = parse_vless_uri(line, idx)
-                if ob:
-                    # Проверка hole
-                    try:
-                        addr = ob.get("settings", {}).get("vnext", [{}])[0].get("address", "")
-                        if addr == "hole":
-                            hole = True
-                    except Exception:
-                        pass
-                    outbounds.append(ob)
-                    idx += 1
-
+        outbounds, hole = _parse_vless_lines(data)
         if not outbounds:
             log_error("No valid vless:// URIs parsed")
 
@@ -450,17 +457,7 @@ def main():
         print("[]")
         sys.exit(1)
 
-    lines = [l.strip() for l in data.splitlines() if l.strip()]
-
-    outbounds = []
-    idx = 0
-
-    for line in lines:
-        if line.startswith("vless://"):
-            ob = parse_vless_uri(line, idx)
-            if ob:
-                outbounds.append(ob)
-                idx += 1
+    outbounds, _ = _parse_vless_lines(data)
 
     if not outbounds:
         log_error("No valid vless:// URIs parsed")
