@@ -385,7 +385,8 @@ cfg={
     'hwid':'',
     'network':{'interface':'','ip':'','mask':'$LAN_MASK','gateway':''},
     'xray':{'gid':990,'tproxy_port':12345,'tproxy_mark':1,'bypass_mark':2},
-    'dns':{'servers':'77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0','local_tcp_ports':'8090','dwl_domain':''}
+    'dns':{'servers':'77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0','local_tcp_ports':'8090','dwl_domain':''},
+    'geodata':{'dir':'/usr/local/share/xray','geoip_url':'https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat','geosite_url':'https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat'}
 }
 json.dump(cfg,open('$SETTINGS_JSON','w'),indent=2,ensure_ascii=False)
 "
@@ -700,13 +701,13 @@ update_geo() {
 	echo "  ✓ $BASE готов"
 }
 
-update_geo \
-	"https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat" \
-	"$GEO_DIR/geoip.dat"
+GEO_DIR="$(settings_get '.geodata.dir')"
+[ -z "$GEO_DIR" ] && GEO_DIR="/usr/local/share/xray"
+GEOIP_URL="$(settings_get '.geodata.geoip_url')"
+GEOSITE_URL="$(settings_get '.geodata.geosite_url')"
 
-update_geo \
-	"https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat" \
-	"$GEO_DIR/geosite.dat"
+update_geo "$GEOIP_URL" "$GEO_DIR/geoip.dat"
+update_geo "$GEOSITE_URL" "$GEO_DIR/geosite.dat"
 
 # HWID
 echo "  → Генерируем HWID..."

@@ -74,12 +74,16 @@ PARSER="/usr/local/share/xray/xray-sub-parser.py"
 NFT_UPDATER="/usr/local/share/xray/update-nft.sh"
 REPO="https://raw.githubusercontent.com/kirilllavrov/XPowerSpirit-Linux-Gateway/main"
 
-GEO_DIR="/usr/local/share/xray"
+# Геоданные — из settings.json (с умолчаниями)
+GEO_DIR="$(settings_get '.geodata.dir')"
+[ -z "$GEO_DIR" ] && GEO_DIR="/usr/local/share/xray"
 GEOIP="$GEO_DIR/geoip.dat"
 GEOSITE="$GEO_DIR/geosite.dat"
 
-GEOIP_URL="https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat"
-GEOSITE_URL="https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat"
+GEOIP_URL="$(settings_get '.geodata.geoip_url')"
+[ -z "$GEOIP_URL" ] && GEOIP_URL="https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat"
+GEOSITE_URL="$(settings_get '.geodata.geosite_url')"
+[ -z "$GEOSITE_URL" ] && GEOSITE_URL="https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat"
 
 mkdir -p "$STATE_DIR" "$TMP_DIR"
 
