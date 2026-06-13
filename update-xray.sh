@@ -22,12 +22,15 @@ fi
 LOG="/var/log/xray-update.log"
 mkdir -p "$(dirname "$LOG")"
 
+# Все ошибки stderr — в лог (чтобы set -e не молчал)
+exec 2>>"$LOG"
+
 die() {
 	echo "[X] $1" | tee -a "$LOG"
 	exit 1
 }
 
-# Единая функция загрузки (curl) — с авто-заголовками и повторными попытками
+echo "===== $(date) =====" >>"$LOG"
 fetch_url() {
 	local url="$1"
 	local dst="$2"
@@ -102,8 +105,6 @@ GEOIP_URL="$(settings_get '.geodata.geoip_url')"
 GEOSITE_URL="$(settings_get '.geodata.geosite_url')"
 
 mkdir -p "$STATE_DIR" "$TMP_DIR"
-
-echo "===== $(date) =====" >>"$LOG"
 
 extract_sha256() {
 	awk -F '= ' '/^SHA2-256/{print $2}' "$1" | tr -d ' \n'
