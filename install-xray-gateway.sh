@@ -71,30 +71,41 @@ echo "[+] Все зависимости установлены"
 # ============================================
 echo "=== Синхронизация времени ==="
 
-timedatectl set-timezone Europe/Moscow 2>/dev/null || true
-
-# Ждём синхронизации времени
-if command -v timedatectl >/dev/null 2>&1; then
-	timedatectl set-ntp true 2>/dev/null || true
-	# Ждём синхронизации только если D-Bus доступен
-	if timedatectl status >/dev/null 2>&1; then
-		for i in $(seq 1 5); do
-			if timedatectl status | grep -q "synchronized: yes"; then
-				break
-			fi
-			echo "  → Ожидание синхронизации времени... ($i)"
-			sleep 2
-		done
-	fi
+# Установка timezone: пробуем timedatectl, fallback — прямой symlink
+TZ_SET=0
+if timedatectl set-timezone Europe/Moscow 2>/dev/null; then
+	TZ_SET=1
 else
-	# Fallback: ntpd
-	apt-get install -y -qq ntpdate 2>/dev/null || true
-	ntpdate -u ru.pool.ntp.org 2>/dev/null ||
-		ntpdate -u time.google.com 2>/dev/null ||
-		echo " [!] Синхронизация времени не удалась, продолжаем..."
+	# D-Bus недоступен (контейнер/minimal) — ставим symlink напрямую
+	if [ -f /usr/share/zoneinfo/Europe/Moscow ]; then
+		ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
+		TZ_SET=1
+		echo "  → Timezone установлен через /etc/localtime"
+	fi
 fi
+[ "$TZ_SET" = "1" ] && echo "  ✓ Timezone: Europe/Moscow"
 
-echo "[+] Timezone: Europe/Moscow, время синхронизировано"
+# Синхронизация времени
+if command -v timedatectl >/dev/null 2>&1 && timedatectl status >/dev/null 2>&1; then
+	# systemd-timesyncd с D-Bus
+	timedatectl set-ntp true 2>/dev/null || true
+	for i in $(seq 1 5); do
+		if timedatectl status | grep -q "synchronized: yes"; then
+			break
+		fi
+		echo "  → Ожидание синхронизации времени... ($i)"
+		sleep 2
+	done
+else
+	# Fallback: ntpdate (без D-Bus)
+	apt-get install -y -qq ntpdate 2>/dev/null || true
+	if ntpdate -u ru.pool.ntp.org 2>/dev/null ||
+		ntpdate -u time.google.com 2>/dev/null; then
+		echo "  ✓ Время синхронизировано (ntpdate)"
+	else
+		echo "  [!] Синхронизация времени не удалась, продолжаем..."
+	fi
+fi
 echo ""
 
 # ============================================
