@@ -521,10 +521,10 @@ echo "[+] Сетевые параметры сохранены"
 
 # Сохраняем приоритетный домен
 if [ -n "$DWL_DOMAIN" ]; then
-	settings_set '.dns.dwl_domain' "$DWL_DOMAIN"
+	settings_set '.subscription.dwl_domain' "$DWL_DOMAIN"
 	echo "[+] Приоритетный домен: $DWL_DOMAIN"
 else
-	settings_set '.dns.dwl_domain' ''
+	settings_set '.subscription.dwl_domain' ''
 fi
 
 # ============================================

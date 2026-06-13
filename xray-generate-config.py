@@ -39,10 +39,10 @@ def load_routing() -> dict:
     return s.get("routing", {})
 
 def _load_domain_whitelist() -> list:
-    """Загружает whitelist из settings.json (dns.dwl_domain)"""
+    """Загружает whitelist из settings.json (subscription.dwl_domain)"""
     whitelist = []
     s = load_settings()
-    dwl = s.get("dns", {}).get("dwl_domain", "")
+    dwl = s.get("subscription", {}).get("dwl_domain", "")
     if dwl:
         whitelist.append(dwl)
     return whitelist

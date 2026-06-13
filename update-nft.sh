@@ -24,10 +24,14 @@ BYPASS_MARK=2
 TABLE_NAME="inet xray"
 SETTINGS_JSON="/etc/xray/settings.json"
 
-# Порты локальных сервисов на шлюзе, доступных клиентам (TorrServer и др.)
+# Порты локальных сервисов на шлюзе (TorrServer и др.) — bypass TProxy
+# Пример с несколькими портами: LOCAL_TCP_PORTS="8090 8091 8443"
 LOCAL_TCP_PORTS="8090"
 
-# DoH/DNS серверы (должны совпадать с hosts в xray-generate-config.py)
+# DoH-серверы (ДОЛЖНЫ совпадать с hosts в xray-generate-config.py)
+#   common.dot.dns.yandex.net → 77.88.8.1, 77.88.8.8
+#   cloudflare-dns.com        → 1.0.0.1, 1.1.1.1
+#   dns.nextdns.io            → 45.90.28.0, 45.90.30.0
 DNS_IPS="77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0"
 
 # ============================================
@@ -50,12 +54,6 @@ if [ -f "$SETTINGS_JSON" ]; then
 
 	_bmark=$(settings_get '.xray.bypass_mark')
 	[ -n "$_bmark" ] && BYPASS_MARK="$_bmark"
-
-	_dns=$(settings_get '.dns.servers')
-	[ -n "$_dns" ] && DNS_IPS="$_dns"
-
-	_ports=$(settings_get '.dns.local_tcp_ports')
-	[ -n "$_ports" ] && LOCAL_TCP_PORTS="$_ports"
 fi
 
 # ============================================
