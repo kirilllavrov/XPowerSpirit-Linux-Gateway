@@ -117,12 +117,14 @@ extract_sha256() {
 rotate_log() {
 	local log="$1"
 	local max_size="${2:-1048576}" # по умолчанию 1MB
-	[ -f "$log" ] || return
-	local size=$(stat -c%s "$log" 2>/dev/null || wc -c <"$log")
+	[ -f "$log" ] || return 0
+	local size
+	size=$(stat -c%s "$log" 2>/dev/null || wc -c <"$log")
 	if [ "$size" -gt "$max_size" ]; then
 		: >"$log"
 		echo "[*] Лог очищен: $log" >>"$LOG"
 	fi
+	return 0
 }
 rotate_log "/var/log/xray-access.log" 524288
 rotate_log "/var/log/xray-error.log" 262144
