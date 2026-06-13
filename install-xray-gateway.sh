@@ -76,13 +76,16 @@ timedatectl set-timezone Europe/Moscow 2>/dev/null || true
 # Ждём синхронизации времени
 if command -v timedatectl >/dev/null 2>&1; then
 	timedatectl set-ntp true 2>/dev/null || true
-	for i in $(seq 1 10); do
-		if timedatectl status | grep -q "synchronized: yes"; then
-			break
-		fi
-		echo "  → Ожидание синхронизации времени... ($i)"
-		sleep 2
-	done
+	# Ждём синхронизации только если D-Bus доступен
+	if timedatectl status >/dev/null 2>&1; then
+		for i in $(seq 1 5); do
+			if timedatectl status | grep -q "synchronized: yes"; then
+				break
+			fi
+			echo "  → Ожидание синхронизации времени... ($i)"
+			sleep 2
+		done
+	fi
 else
 	# Fallback: ntpd
 	apt-get install -y -qq ntpdate 2>/dev/null || true
