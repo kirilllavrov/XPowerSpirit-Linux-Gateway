@@ -348,23 +348,37 @@ download_file() {
 	_model=$(settings_get ".device_model" 2>/dev/null || echo "")
 	_os=$(settings_get ".device_os" 2>/dev/null || echo "")
 
-	# Cache-buster для GitHub raw
-	local cache_buster="_t=$(date +%s)_r=$RANDOM"
+	# Cache-buster для GitHub raw (POSIX: $$ вместо $RANDOM)
+	local cache_buster="_t=$(date +%s)_r=$$"
 	case "$url" in
 	*raw.githubusercontent.com*) url="${url}?${cache_buster}" ;;
 	esac
 
 	while [ $retry -le $max_retries ]; do
-		curl -s -L --max-time 15 \
-			-H "User-Agent: $_ua" \
-			${_ver:+-H "X-Ver-Os: $_ver"} \
-			${_model:+-H "X-Device-Model: $_model"} \
-			${_os:+-H "X-Device-Os: $_os"} \
-			${1:+-H "$1"} \
-			${2:+-H "$2"} \
-			${3:+-H "$3"} \
-			-o "$dst" "$url"
-		local rc=$?
+		# На последней попытке — показываем ошибки curl
+		if [ $retry -eq $max_retries ]; then
+			curl -s -L --max-time 15 --show-error \
+				-H "User-Agent: $_ua" \
+				${_ver:+-H "X-Ver-Os: $_ver"} \
+				${_model:+-H "X-Device-Model: $_model"} \
+				${_os:+-H "X-Device-Os: $_os"} \
+				${1:+-H "$1"} \
+				${2:+-H "$2"} \
+				${3:+-H "$3"} \
+				-o "$dst" "$url" 2>&1
+			local rc=$?
+		else
+			curl -s -L --max-time 15 \
+				-H "User-Agent: $_ua" \
+				${_ver:+-H "X-Ver-Os: $_ver"} \
+				${_model:+-H "X-Device-Model: $_model"} \
+				${_os:+-H "X-Device-Os: $_os"} \
+				${1:+-H "$1"} \
+				${2:+-H "$2"} \
+				${3:+-H "$3"} \
+				-o "$dst" "$url"
+			local rc=$?
+		fi
 
 		if [ $rc -eq 0 ] && [ -s "$dst" ]; then
 			if head -n 1 "$dst" 2>/dev/null | grep -qi "<html\|<!DOCTYPE"; then
