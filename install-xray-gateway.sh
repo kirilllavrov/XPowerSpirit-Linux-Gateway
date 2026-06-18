@@ -22,10 +22,19 @@
 
 set -e
 
-# Логирование
+# Логирование (POSIX: mkfifo вместо process substitution, совместимо с dash/sh)
 LOG_FILE="/var/log/xray_install.log"
-exec 1> >(tee -a "$LOG_FILE")
-exec 2>&1
+LOG_PIPE="/tmp/xray_install.pipe.$$"
+mkfifo "$LOG_PIPE" 2>/dev/null || {
+	# fallback: если mkfifo не удался — пишем только в файл
+	exec 1>>"$LOG_FILE" 2>&1
+	echo "[!] Логирование только в файл (mkfifo не удался)"
+}
+if [ -p "$LOG_PIPE" ]; then
+	tee -a "$LOG_FILE" <"$LOG_PIPE" &
+	exec 1>"$LOG_PIPE" 2>&1
+	rm -f "$LOG_PIPE"
+fi
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
