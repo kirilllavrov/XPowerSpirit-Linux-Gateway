@@ -74,6 +74,12 @@ if ! command -v sha256sum >/dev/null 2>&1; then
 	apt-get install -y -qq coreutils
 fi
 
+# Проверяем crontab (может отсутствовать в минимальных установках Ubuntu)
+if ! command -v crontab >/dev/null 2>&1; then
+	echo "→ Устанавливаю cron..."
+	apt-get install -y -qq cron
+fi
+
 echo "[+] Все зависимости установлены"
 
 # ============================================
