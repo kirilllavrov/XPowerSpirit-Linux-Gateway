@@ -730,7 +730,7 @@ else
 		echo "  [X] Не удалось извлечь SHA2-256 из .dgst"
 		exit 1
 	}
-	echo "  → SHA2-256: ${REMOTE_SHA:0:16}..."
+	echo "  → SHA2-256: $(echo "$REMOTE_SHA" | cut -c1-16)..."
 
 	FREE_SPACE_TMP=$(df /tmp | awk 'NR==2 {print $4}')
 	if [ "$FREE_SPACE_TMP" -lt 20480 ]; then
