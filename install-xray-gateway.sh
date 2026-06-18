@@ -23,7 +23,7 @@
 set -e
 
 # Логирование
-LOG_FILE="/tmp/xray_install.log"
+LOG_FILE="/var/log/xray_install.log"
 exec 1> >(tee -a "$LOG_FILE")
 exec 2>&1
 
