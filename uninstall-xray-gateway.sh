@@ -6,7 +6,7 @@ set -e
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║       Удаление Xray Transparent Gateway             ║"
+echo "║       Удаление Xray Transparent Gateway              ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
