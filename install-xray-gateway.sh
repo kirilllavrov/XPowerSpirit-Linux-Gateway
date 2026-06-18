@@ -402,6 +402,10 @@ download_file() {
 download_script() {
 	local url="$1"
 	local dst="$2"
+	if [ -x "$dst" ]; then
+		echo "  ✓ $(basename "$dst") уже загружен"
+		return 0
+	fi
 	if download_file "$url" "$dst"; then
 		chmod +x "$dst"
 		echo "  → $dst"
@@ -425,11 +429,20 @@ update_geo() {
 
 	echo "  → $BASE"
 	download_file "${URL}.sha256sum" "$TMP_SHA" || {
+		if [ -f "$DEST" ]; then
+			echo "  [!] Не удалось проверить SHA для $BASE, использую существующий файл"
+			return 0
+		fi
 		echo "  [X] Не удалось получить SHA256 для $BASE"
 		exit 1
 	}
 	REMOTE_SHA="$(cut -d' ' -f1 "$TMP_SHA")"
 	[ -z "$REMOTE_SHA" ] && {
+		if [ -f "$DEST" ]; then
+			echo "  [!] Пустой SHA для $BASE, использую существующий файл"
+			rm -f "$TMP_SHA"
+			return 0
+		fi
 		echo "  [X] Пустой SHA256 для $BASE"
 		exit 1
 	}
@@ -442,6 +455,10 @@ update_geo() {
 	fi
 
 	download_file "$URL" "$TMP" || {
+		if [ -f "$DEST" ]; then
+			echo "  [!] Не удалось обновить $BASE, использую существующий"
+			return 0
+		fi
 		echo "  [X] Не удалось скачать $BASE"
 		exit 1
 	}
