@@ -18,6 +18,7 @@
 #   --sub-ua=UA      User-Agent для подписки
 #   --remarks=FILTER Фильтр remarks в JSON-подписке
 #   --dwl=DOMAIN     Приоритетный домен для VLESS (Base64) подписок
+#   --no-dns          Не настраивать DNS (dnsmasq, resolv.conf, systemd-resolved)
 
 set -e
 
@@ -144,6 +145,7 @@ GATEWAY_IP=""
 SUB_URL=""
 REMARKS_FILTER=""
 DWL_DOMAIN=""
+SKIP_DNS=0
 
 # ============================================
 #   АВТООПРЕДЕЛЕНИЕ СЕТИ
@@ -309,6 +311,7 @@ for arg in "$@"; do
 	--ip=*) ARG_IP="${arg#*=}" ;;
 	--mask=*) ARG_MASK="${arg#*=}" ;;
 	--gw=*) ARG_GW="${arg#*=}" ;;
+	--no-dns) SKIP_DNS=1 ;;
 	*) echo "[!] Неизвестный аргумент: $arg" ;;
 	esac
 done
@@ -581,6 +584,9 @@ if systemctl is-active --quiet NetworkManager 2>/dev/null; then
 	echo "  → NetworkManager будет отключён после перезагрузки"
 fi
 
+if [ "$SKIP_DNS" = "1" ]; then
+	echo "  → DNS не настраивается (--no-dns)"
+else
 # Настраиваем dnsmasq как DNS-фронтенд (без DHCP)
 echo "=== Установка dnsmasq ==="
 apt-get install -y -qq dnsmasq 2>/dev/null || true
@@ -640,6 +646,7 @@ else
 		echo "  → resolv.conf переключён на 127.0.0.1"
 	fi
 fi
+fi  # SKIP_DNS
 
 echo "[+] Сетевая конфигурация сохранена (применится при перезагрузке)"
 
@@ -987,9 +994,11 @@ echo "[+] Network hook: автообновление при поднятии с�
 # ============================================
 echo "=== Шаг 14: Запуск служб ==="
 
-# Запускаем dnsmasq
-systemctl enable dnsmasq 2>/dev/null || true
-systemctl restart dnsmasq 2>/dev/null || true
+# Запускаем dnsmasq (если DNS не пропущен)
+if [ "$SKIP_DNS" != "1" ]; then
+	systemctl enable dnsmasq 2>/dev/null || true
+	systemctl restart dnsmasq 2>/dev/null || true
+fi
 
 # Применяем nftables сейчас (до запуска Xray)
 "$NFT_UPDATER" 2>/dev/null || true
