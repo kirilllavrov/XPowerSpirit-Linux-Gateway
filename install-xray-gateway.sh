@@ -53,7 +53,7 @@ echo ""
 echo "=== Проверка зависимостей ==="
 
 # Проверяем и устанавливаем необходимые пакеты
-REQUIRED_PACKAGES="curl python3 unzip nftables iproute2 jq"
+REQUIRED_PACKAGES="curl python3 unzip nftables iproute2 jq cron"
 MISSING=""
 
 for pkg in $REQUIRED_PACKAGES; do
@@ -72,12 +72,6 @@ fi
 if ! command -v sha256sum >/dev/null 2>&1; then
 	echo "→ Устанавливаю coreutils..."
 	apt-get install -y -qq coreutils
-fi
-
-# Проверяем crontab (может отсутствовать в минимальных установках Ubuntu)
-if ! command -v crontab >/dev/null 2>&1; then
-	echo "→ Устанавливаю cron..."
-	apt-get install -y -qq cron
 fi
 
 echo "[+] Все зависимости установлены"
