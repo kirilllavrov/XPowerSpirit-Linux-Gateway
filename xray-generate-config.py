@@ -282,8 +282,8 @@ def base_config() -> dict:
     return {
         "log": {
             "loglevel": "none",
-            "access": "/tmp/log/xray-access.log",
-            "error": "/tmp/log/xray-error.log"
+            "access": "/var/log/xray-access.log",
+            "error": "/var/log/xray-error.log"
         },
         "dns": {
             "tag": "dns-inbuilt",

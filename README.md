@@ -160,7 +160,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | Hotplug | `/etc/hotplug.d/` | systemd `.path` unit |
 | Путь Xray | `/usr/bin/xray` | `/usr/local/bin/xray` |
 | Путь скриптов | `/usr/share/xray/` | `/usr/local/share/xray/` |
-| Логи Xray | `/tmp/log/` | `/var/log/` |
+| Логи Xray | `/var/log/` | `/var/log/` |
 | LED | UCI + sysfs (Cudy WR3000S) | sysfs (автоопределение) |
 
 ### Выбор прокси-сервера — только для Base64 VLESS
