@@ -110,6 +110,36 @@ human_bytes() {
 	}'
 }
 
+# Дамп таблицы nftables. Без root и без беспарольного sudo — возвращает 1,
+# чтобы `status` не зависал на запросе пароля.
+nft_dump() {
+	if [ "$(id -u)" -eq 0 ]; then
+		nft list table inet xray 2>/dev/null
+	elif sudo -n true 2>/dev/null; then
+		sudo -n nft list table inet xray 2>/dev/null
+	else
+		return 1
+	fi
+}
+
+# Есть ли в дампе правило сопоставления `meta mark <mark>`.
+# nft печатает метки как 0x00000002, но формат зависит от версии —
+# принимаем и восьмизначный hex, и короткий hex, и десятичное значение.
+nft_has_mark() {
+	local mark="$1" dump="$2" hex
+	hex=$(printf '%x' "$mark")
+	printf '%s\n' "$dump" |
+		grep -qE "meta mark (0x0*${hex}|${mark})([[:space:]]|$)"
+}
+
+# Таблица policy routing: имя или номер (rt_tables может задавать "100 xray")
+policy_lookup() {
+	local mark="$1" hex
+	hex=$(printf '%x' "$mark")
+	ip rule show 2>/dev/null |
+		sed -nE "s/.*fwmark 0x0*${hex}[[:space:]]+lookup ([^[:space:]]+).*/\1/p" | head -1
+}
+
 svc_active() {
 	systemctl is-active --quiet "$SERVICE" 2>/dev/null
 }
@@ -260,19 +290,22 @@ do_status() {
 
 	echo -n "  nftables:          "
 	local rules nft_out
-	if nft_out=$(run_root nft list table inet xray 2>/dev/null); then
+	if nft_out=$(nft_dump); then
 		rules=$(printf '%s\n' "$nft_out" | grep -c '^[[:space:]]')
 		echo -e "${GREEN}● таблица inet xray${NC} (строк: $rules)"
+	elif [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+		echo -e "${YELLOW}○ нет доступа (нужен root)${NC}"
 	else
 		echo -e "${RED}○ не настроена${NC}"
 	fi
 
 	echo -n "  Policy routing:    "
-	local mark
+	local mark table
 	mark=$(settings_get "xray.tproxy_mark")
 	mark="${mark:-1}"
-	if ip rule show 2>/dev/null | grep -q "fwmark 0x$(printf '%x' "$mark") lookup 100"; then
-		echo -e "${GREEN}● fwmark $mark → table 100${NC}"
+	table=$(policy_lookup "$mark")
+	if [ -n "$table" ]; then
+		echo -e "${GREEN}● fwmark $mark → таблица $table${NC}"
 	else
 		echo -e "${RED}○ не настроен${NC}"
 	fi
@@ -428,11 +461,13 @@ do_test() {
 	fi
 
 	echo -n "  nftables bypass:   "
-	local mark
+	local mark dump
 	mark=$(settings_get "xray.bypass_mark")
 	mark="${mark:-2}"
-	if run_root nft list table inet xray 2>/dev/null | grep -q "meta mark 0x$(printf '%x' "$mark")"; then
+	if dump=$(nft_dump) && nft_has_mark "$mark" "$dump"; then
 		echo -e "${GREEN}● метка ${mark} исключается${NC}"
+	elif [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+		echo -e "${YELLOW}○ нет доступа (нужен root)${NC}"
 	else
 		echo -e "${YELLOW}○ правило не найдено${NC}"
 	fi

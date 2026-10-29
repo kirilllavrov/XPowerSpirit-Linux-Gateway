@@ -161,6 +161,21 @@ def base_config() -> dict:
     tproxy_port = setting("xray.tproxy_port", 12345)
     dns_in_port = setting("xray.dns_in_port", 5353)
 
+    # settings.json от старых версий: dns.servers был строкой "1.1.1.1 8.8.8.8",
+    # а dns.hosts отсутствовал. Подставляем значения по умолчанию, иначе Xray
+    # откажется грузить конфиг (servers должен быть массивом).
+    dns_servers = setting("dns.servers", DEFAULT_DNS_SERVERS)
+    if not isinstance(dns_servers, list) or not dns_servers:
+        log_error("  [!] settings.json: dns.servers должен быть массивом — "
+                  "использую значения по умолчанию")
+        dns_servers = DEFAULT_DNS_SERVERS
+
+    dns_hosts = setting("dns.hosts", DEFAULT_DNS_HOSTS)
+    if not isinstance(dns_hosts, dict) or not dns_hosts:
+        log_error("  [!] settings.json: dns.hosts должен быть объектом — "
+                  "использую значения по умолчанию")
+        dns_hosts = DEFAULT_DNS_HOSTS
+
     base = {
         "log": {
             "loglevel": setting("log.loglevel", "none"),
@@ -176,8 +191,8 @@ def base_config() -> dict:
             "disableFallback": setting("dns.disable_fallback", False),
             "disableFallbackIfMatch": setting("dns.disable_fallback_if_match", True),
             "enableParallelQuery": setting("dns.enable_parallel_query", True),
-            "hosts": setting("dns.hosts", DEFAULT_DNS_HOSTS),
-            "servers": setting("dns.servers", DEFAULT_DNS_SERVERS)
+            "hosts": dns_hosts,
+            "servers": dns_servers
         },
         "inbounds": [
             {
