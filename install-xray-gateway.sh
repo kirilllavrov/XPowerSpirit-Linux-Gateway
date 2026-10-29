@@ -141,6 +141,59 @@ settings_get() {
 	jq -r "${1} // empty" "$SETTINGS_JSON" 2>/dev/null
 }
 
+# Определение модели устройства и ОС.
+# Пути вынесены в переменные окружения, чтобы логику можно было проверить
+# на фикстурах без реального железа (см. test-amd64.sh).
+detect_device_info() {
+	local hw_model="${HW_MODEL_FILE:-/boot/dietpi/.hw_model}"
+	local dt_model="${DEVICETREE_MODEL:-/proc/device-tree/model}"
+	local dmi_product="${DMI_PRODUCT:-/sys/class/dmi/id/product_name}"
+	local os_release="${OS_RELEASE_FILE:-/etc/os-release}"
+	local debian_version="${DEBIAN_VERSION_FILE:-/etc/debian_version}"
+	local src
+
+	DEVICE_MODEL=""
+	DEVICE_OS=""
+	VER_OS=""
+
+	# DietPi хранит и модель, и кодовое имя дистрибутива
+	if [ -r "$hw_model" ]; then
+		# shellcheck disable=SC1090
+		. "$hw_model"
+		DEVICE_MODEL="${G_HW_MODEL_NAME:-}"
+		VER_OS="${G_DISTRO_NAME:-}"
+		DEVICE_OS="DietPi"
+	fi
+
+	# Модель: device-tree (ARM) → DMI (x86) → архитектура.
+	# Проверяем именно читаемость файла: `cat ... | tr` возвращает код tr,
+	# поэтому прежняя конструкция `cat A | tr || cat B` никогда не доходила до B.
+	if [ -z "$DEVICE_MODEL" ]; then
+		for src in "$dt_model" "$dmi_product"; do
+			[ -r "$src" ] || continue
+			DEVICE_MODEL="$(tr -d '\0' <"$src" 2>/dev/null | sed 's/[[:space:]]*$//')"
+			[ -n "$DEVICE_MODEL" ] && break
+		done
+	fi
+	[ -z "$DEVICE_MODEL" ] && DEVICE_MODEL="$(uname -m)"
+
+	# Имя ОС: DietPi (выше) → ID из os-release → debian
+	if [ -z "$DEVICE_OS" ] && [ -r "$os_release" ]; then
+		DEVICE_OS="$(sed -n 's/^ID=["]*\([^"]*\)["]*$/\1/p' "$os_release" | head -1)"
+	fi
+	[ -z "$DEVICE_OS" ] && DEVICE_OS="debian"
+
+	# Версия: кодовое имя (как G_DISTRO_NAME у DietPi) → VERSION_ID → debian_version
+	if [ -z "$VER_OS" ] && [ -r "$os_release" ]; then
+		VER_OS="$(sed -n 's/^VERSION_CODENAME=["]*\([^"]*\)["]*$/\1/p' "$os_release" | head -1)"
+		[ -z "$VER_OS" ] && VER_OS="$(sed -n 's/^VERSION_ID=["]*\([^"]*\)["]*$/\1/p' "$os_release" | head -1)"
+	fi
+	if [ -z "$VER_OS" ] && [ -r "$debian_version" ]; then
+		VER_OS="$(cat "$debian_version" 2>/dev/null)"
+	fi
+	[ -z "$VER_OS" ] && VER_OS="unknown"
+}
+
 settings_set() {
 	local key="$1" val="$2" tmp="${SETTINGS_JSON}.tmp"
 	jq --arg v "$val" "${key} = \$v" "$SETTINGS_JSON" > "$tmp" 2>/dev/null && mv "$tmp" "$SETTINGS_JSON"
@@ -534,19 +587,7 @@ else
 fi
 
 # Определяем и сохраняем информацию об устройстве
-DEVICE_MODEL=""
-VER_OS=""
-DEVICE_OS="$(lsb_release -is 2>/dev/null || grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"')"
-[ -z "$DEVICE_OS" ] && DEVICE_OS="Debian"
-
-if [ -f /boot/dietpi/.hw_model ]; then
-	source /boot/dietpi/.hw_model
-	DEVICE_MODEL="${G_HW_MODEL_NAME:-}"
-	VER_OS="${G_DISTRO_NAME:-}"
-	DEVICE_OS="DietPi"
-fi
-[ -z "$DEVICE_MODEL" ] && DEVICE_MODEL="$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0' || cat /sys/class/dmi/id/product_name 2>/dev/null || uname -m)"
-[ -z "$VER_OS" ] && VER_OS="$(cat /etc/debian_version 2>/dev/null || lsb_release -rs 2>/dev/null)"
+detect_device_info
 
 settings_set '.device_model' "$DEVICE_MODEL"
 settings_set '.device_os' "$DEVICE_OS"
