@@ -29,12 +29,21 @@ die() {
 }
 
 echo "===== $(date) =====" >>"$LOG"
+
+#   fetch_url "URL" "DEST" ["HEADER1" ...]
+#   Системные заголовки (User-Agent, X-Ver-Os, X-Device-Model, X-Device-Os)
+#   берутся из settings.json; дополнительные передаются аргументами.
 fetch_url() {
 	local url="$1"
 	local dst="$2"
+	shift 2
 	local max_retries=3
 	local retry=1
 	local delay=2
+
+	local -a extra=()
+	local h
+	for h in "$@"; do extra+=(-H "$h"); done
 
 	# Системные заголовки из settings.json
 	local _ua _ver _model _os
@@ -55,6 +64,7 @@ fetch_url() {
 			${_ver:+-H "X-Ver-Os: $_ver"} \
 			${_model:+-H "X-Device-Model: $_model"} \
 			${_os:+-H "X-Device-Os: $_os"} \
+			"${extra[@]}" \
 			-o "$dst" "$url"
 		local rc=$?
 
@@ -293,35 +303,32 @@ update_geo "$GEOSITE_URL" "$GEOSITE"
 
 echo "→ Генерация config.json (User-Agent: $SUB_USER_AGENT)..." >>"$LOG"
 
-# Скачиваем подписку
-if curl -s -L -H "User-Agent: $SUB_USER_AGENT" -H "x-hwid: $HWID" "$SUB_URL" -o "$TMP_DIR/sub.txt"; then
+# Скачиваем подписку: fetch_url добавляет системные заголовки устройства
+# (X-Device-Model / X-Device-Os / X-Ver-Os) и повторяет попытку при сбое
+echo "→ Запрос подписки (HWID: $HWID)..." >>"$LOG"
+if fetch_url "$SUB_URL" "$TMP_DIR/sub.txt" "x-hwid: $HWID"; then
 
-	# Проверяем, что скачалось не HTML
-	if head -n 1 "$TMP_DIR/sub.txt" 2>/dev/null | grep -qi "<html\|<!DOCTYPE"; then
-		echo "[X] Подписка вернула HTML, а не данные" >>"$LOG"
-	else
-		# Единый пайплайн: парсер (с автоопределением формата) → генератор
-		PARSER_ARGS="python3 $PARSER --ua \"$SUB_USER_AGENT\""
-		[ -n "$REMARKS_FILTER" ] && PARSER_ARGS="$PARSER_ARGS --remarks \"$REMARKS_FILTER\""
+	# Единый пайплайн: парсер (с автоопределением формата) → генератор
+	PARSER_ARGS="python3 $PARSER --ua \"$SUB_USER_AGENT\""
+	[ -n "$REMARKS_FILTER" ] && PARSER_ARGS="$PARSER_ARGS --remarks \"$REMARKS_FILTER\""
 
-		if eval $PARSER_ARGS < "$TMP_DIR/sub.txt" > "$TMP_DIR/parsed.json" 2>>"$LOG"; then
-			if python3 "$GENERATOR" --format unified --output "$TMP_DIR/config.json" < "$TMP_DIR/parsed.json" 2>>"$LOG"; then
-				if $XRAY_BIN run -test -config "$TMP_DIR/config.json" >>"$LOG" 2>&1; then
-					mv "$TMP_DIR/config.json" "$CONFIG_JSON"
-					echo "[+] Новый config.json установлен" >>"$LOG"
-				else
-					echo "[X] Новый config.json невалиден" >>"$LOG"
-					$XRAY_BIN run -test -config "$TMP_DIR/config.json" 2>>"$LOG"
-				fi
+	if eval $PARSER_ARGS < "$TMP_DIR/sub.txt" > "$TMP_DIR/parsed.json" 2>>"$LOG"; then
+		if python3 "$GENERATOR" --format unified --output "$TMP_DIR/config.json" < "$TMP_DIR/parsed.json" 2>>"$LOG"; then
+			if $XRAY_BIN run -test -config "$TMP_DIR/config.json" >>"$LOG" 2>&1; then
+				mv "$TMP_DIR/config.json" "$CONFIG_JSON"
+				echo "[+] Новый config.json установлен" >>"$LOG"
 			else
-				echo "[X] Ошибка генератора конфига" >>"$LOG"
+				echo "[X] Новый config.json невалиден" >>"$LOG"
+				$XRAY_BIN run -test -config "$TMP_DIR/config.json" 2>>"$LOG"
 			fi
 		else
-			echo "[X] Ошибка парсера подписки" >>"$LOG"
+			echo "[X] Ошибка генератора конфига" >>"$LOG"
 		fi
+	else
+		echo "[X] Ошибка парсера подписки" >>"$LOG"
 	fi
 else
-	echo "[!] Не удалось скачать подписку" >>"$LOG"
+	echo "[!] Не удалось скачать подписку (сеть или HTML вместо данных)" >>"$LOG"
 fi
 
 # Очистка временных файлов

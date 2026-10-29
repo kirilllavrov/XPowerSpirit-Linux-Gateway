@@ -137,7 +137,7 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | Ключ | Что задаёт |
 | --- | --- |
 | `subscription.url`, `.user_agent`, `.remarks` | подписка, User-Agent и выбранный профиль |
-| `hwid`, `device_model`, `device_os`, `ver_os` | идентификаторы для запроса подписки |
+| `hwid`, `device_model`, `device_os`, `ver_os` | заголовки запроса подписки: `x-hwid`, `X-Device-Model`, `X-Device-Os`, `X-Ver-Os` (уходят и при установке, и при каждом обновлении; пустые значения не отправляются) |
 | `network.interface`, `.ip`, `.mask`, `.gateway` | сетевые параметры шлюза (заполняет установщик) |
 | `xray.gid` | GID группы `xray` (bypass в nftables) |
 | `xray.tproxy_port` | порт TProxy-инбаунда (`tunnel`) |
