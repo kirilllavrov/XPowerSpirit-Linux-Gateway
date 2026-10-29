@@ -2,8 +2,6 @@
 
 Прозрачный шлюз Xray на DietPi (Debian ARM). Устройство работает за основным роутером (Keenetic), принимает трафик клиентов локальной сети и обрабатывает его через Xray TProxy.
 
-> **Отличие от OpenWRT-версии:** адаптирован под DietPi / Debian ARM. Использует systemd, `/etc/network/interfaces`, apt, dnsmasq как DNS-фронтенд, отдельную таблицу nftables.
-
 ```text
 Internet
    │
