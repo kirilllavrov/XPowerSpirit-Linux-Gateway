@@ -4,7 +4,7 @@
 
 > **Отличие от OpenWRT-версии:** адаптирован под DietPi / Debian ARM. Использует systemd, `/etc/network/interfaces`, apt, dnsmasq как DNS-фронтенд, отдельную таблицу nftables.
 
-```
+```text
 Internet
    │
 Keenetic (основной роутер: NAT, DHCP, DNS fallback)
@@ -46,7 +46,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 
 Без аргументов скрипт задаст вопросы:
 
-```
+```text
 ╔══════════════════════════════════════════════════════╗
 ║  Xray Transparent Gateway — установка на DietPi ARM  ║
 ╚══════════════════════════════════════════════════════╝
@@ -80,7 +80,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 ### Аргументы командной строки
 
 | Аргумент | Назначение |
-|---|---|
+| --- | --- |
 | `--sub=URL` | URL подписки |
 | `--ip=X.X.X.X` | Статический IP шлюза (пропускает диалог) |
 | `--mask=X.X.X.X` | Маска подсети (по умолчанию 255.255.255.0) |
@@ -92,6 +92,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 ### Зависимости
 
 Скрипт сам установит необходимые пакеты через `apt`:
+
 - `curl` — загрузка файлов
 - `python3` — парсер подписок и генератор конфига
 - `unzip` — распаковка Xray
@@ -101,13 +102,14 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 ### Настройка основного роутера (Keenetic)
 
 После установки настройте DHCP на Keenetic:
+
 - **Шлюз по умолчанию** = IP Xray-устройства
 - **DNS-сервер** = IP Xray-устройства
 
 ## Состав проекта
 
 | Файл | Роль |
-|---|---|
+| --- | --- |
 | `install-xray-gateway.sh` | Установщик (интерактивный + аргументы) |
 | `update-xray.sh` | Автообновление Xray, geo, подписки, конфига (cron + systemd) |
 | `update-nft.sh` | Применение правил nftables TProxy |
@@ -123,7 +125,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 
 ### DNS без утечек
 
-```
+```text
 Клиенты → dnsmasq :53 → Xray :5353 → dns-out (hijack) → dns-inbuilt (DoH)
                                                        ├─ ru-домены → DoH Yandex
                                                        └─ остальные → DoH Cloudflare / NextDNS
@@ -136,6 +138,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 ### Балансировка прокси
 
 При нескольких серверах в подписке:
+
 - **leastLoad** — автоматический выбор самых стабильных серверов
 - **burstObservatory** — пинг `connectivitycheck.gstatic.com/generate_204` каждую минуту
 - Максимум 2 сервера, RTT до 800 мс
@@ -151,7 +154,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 ### Отличия от OpenWRT-версии
 
 | Компонент | OpenWRT | DietPi (этот проект) |
-|---|---|---|
+| --- | --- | --- |
 | Пакетный менеджер | opkg | apt |
 | Сетевой конфиг | UCI | `/etc/network/interfaces` |
 | Сервис-менеджер | procd/init.d | systemd |
@@ -196,7 +199,7 @@ journalctl -u xray -f
 
 Автоматическое ежедневное обновление в 2:30 ночи + при поднятии сети:
 
-```
+```text
 Cron (2:30) / systemd network hook
         │
         ▼
@@ -217,7 +220,7 @@ Cron (2:30) / systemd network hook
 
 ## Структура файлов после установки
 
-```
+```text
 /usr/local/bin/xray                     # Исполняемый файл Xray
 /usr/local/share/xray/                  # Скрипты и geo-файлы
 ├── xray-generate-config.py
@@ -248,4 +251,4 @@ Cron (2:30) / systemd network hook
 
 ## Лицензия
 
-MIT License — см. [LICENSE](LICENSE)
+MIT License — см. [LICENSE](LICENSE).
