@@ -26,6 +26,8 @@ Keenetic (основной роутер: NAT, DHCP, DNS fallback)
 - DietPi или Debian-based система
 - Доступ в интернет
 - Статический IP (рекомендуется) или DHCP-резервация на основном роутере
+- Права root (установка, nftables, TProxy)
+- Свободные порты `53` (dnsmasq) и `12345` (TProxy); меняются в `settings.json`
 
 ## Установка
 
@@ -87,16 +89,30 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | `--gw=X.X.X.X` | IP основного роутера |
 | `--sub-ua=UA` | User-Agent для запроса подписки |
 | `--remarks=FILTER` | Какой профиль взять из JSON-подписки (подстрока `remarks`, регистр не важен) |
+| `--no-dns` | Не настраивать DNS (dnsmasq, resolv.conf, systemd-resolved) |
 
 ### Зависимости
 
-Скрипт сам установит необходимые пакеты через `apt`:
+Скрипт сам установит недостающие пакеты через `apt`:
 
 - `curl` — загрузка файлов
 - `python3` — парсер подписок и генератор конфига
 - `unzip` — распаковка Xray
-- `dnsmasq` — DNS-фронтенд
-- `coreutils` — sha256sum
+- `nftables` — правила TProxy
+- `iproute2` — policy routing (`ip rule`/`ip route`)
+- `jq` — работа с `settings.json`
+- `cron` — ежедневное автообновление
+- `dnsmasq` — DNS-фронтенд (если DNS не отключён через `--no-dns`)
+- `coreutils` — `sha256sum`
+
+### После установки
+
+Проверьте состояние шлюза:
+
+```sh
+xpower status     # сервис, nftables, DNS, режим подписки, трафик
+xpower test       # интернет, DNS, TProxy, выход через прокси
+```
 
 ### Настройка основного роутера (Keenetic)
 
@@ -123,19 +139,25 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | Ключ | Что задаёт |
 | --- | --- |
 | `subscription.url`, `.user_agent`, `.remarks` | подписка, User-Agent и выбранный профиль |
+| `hwid`, `device_model`, `device_os`, `ver_os` | идентификаторы для запроса подписки |
+| `network.interface`, `.ip`, `.mask`, `.gateway` | сетевые параметры шлюза (заполняет установщик) |
+| `xray.gid` | GID группы `xray` (bypass в nftables) |
 | `xray.tproxy_port` | порт TProxy-инбаунда (`tunnel`) |
 | `xray.dns_in_port` | порт DNS-инбаунда, куда форвардит dnsmasq |
 | `xray.tproxy_mark` / `xray.bypass_mark` | метки TProxy и bypass в nftables и `sockopt.mark` |
 | `xray.tcp_keepalive_interval` | `sockopt.tcpKeepAliveInterval` у outbound'ов |
 | `xray.direct_domain_strategy` | `sockopt.domainStrategy` у выхода `direct` |
 | `log.loglevel`, `.access`, `.error` | логи Xray |
+| `api.enabled`, `api.listen_port` | gRPC API для статистики (`stats`, `api`, `policy` в конфиге) |
 | `dns.query_strategy`, `.serve_expired_ttl`, `.dnsmasq_fallback` | параметры DNS |
+| `dns.disable_cache`, `.serve_stale`, `.disable_fallback`, `.disable_fallback_if_match`, `.enable_parallel_query` | флаги DNS Xray |
 | `dns.hosts` | статические IP DoH-серверов (они же bypass-адреса в nftables) |
 | `dns.servers` | список DNS-серверов встроенного DNS Xray |
 | `balancer.expected`, `.max_rtt`, `.baselines`, `.fallback_tag` | стратегия `leastLoad` |
 | `observatory.destination`, `.interval`, `.sampling`, `.timeout`, `.http_method` | `burstObservatory` |
 | `routing.domain_strategy` | `routing.domainStrategy` |
 | `routing.direct` / `.block` / `.proxy` / `.doh_bypass` | категории маршрутизации |
+| `geodata.dir`, `.geoip_url`, `.geosite_url` | откуда и куда качать geo-файлы |
 
 Значения по умолчанию для отсутствующих ключей оставлены в коде только ради совместимости с `settings.json` от старых версий.
 
@@ -152,10 +174,14 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
                                                        ├─ ru-домены → DoH Yandex
                                                        └─ остальные → DoH Cloudflare / comss.one / ffmuc.net
 
-Шлюз (собственный DNS) → 1.0.0.1 (напрямую через основной роутер)
+Собственный DNS шлюза → 127.0.0.1:53 (тот же dnsmasq) → Xray
 ```
 
-`systemd-resolved` отключается при установке чтобы освободить порт 53 для dnsmasq. DHCP не раздаётся — этим занимается основной роутер (Keenetic).
+`systemd-resolved` отключается при установке чтобы освободить порт 53 для dnsmasq, `/etc/resolv.conf` указывает на `127.0.0.1`. DHCP не раздаётся — этим занимается основной роутер (Keenetic).
+
+Если Xray остановлен, dnsmasq отвечает через `dns.dnsmasq_fallback` (`77.88.8.8`) — клиенты не остаются без DNS.
+
+Запросы к DoH-серверам идут через `https+local://` — режим DOHL, то есть **мимо** routing и прокси, напрямую. Имена DoH-серверов при этом должны разрешаться без обращения к внешнему DNS, поэтому их IP указаны в `dns.hosts`: на шлюзе системный резолвер сам ходит через Xray, и без этих записей получился бы цикл `Xray → DoH → DNS → Xray`.
 
 ### Балансировка прокси
 
@@ -170,9 +196,12 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 
 ### Защита от петель
 
-- Все outbound'ы Xray помечаются `sockopt.mark=2`
-- nftables PREROUTING: `meta mark 2 return`
-- IP прокси-серверов автоматически извлекаются из config.json и добавляются в bypass
+Собственный трафик Xray не должен снова попасть в TProxy:
+
+- все outbound'ы помечаются `sockopt.mark` = `xray.bypass_mark` (по умолчанию 2);
+- в `PREROUTING` правило `meta mark 2 return` пропускает такие пакеты мимо TProxy;
+- в `OUTPUT` дополнительно работает `meta skgid <xray.gid>` — трафик процессов группы `xray` помечается bypass-меткой (работает даже если `sockopt.mark` не применился);
+- к локальным адресам (`fib daddr type local`), приватным сетям, DoH-серверам, NTP и DHCP правила не применяются вовсе.
 
 ### Отличия от OpenWRT-версии
 
@@ -187,7 +216,9 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | Путь Xray | `/usr/bin/xray` | `/usr/local/bin/xray` |
 | Путь скриптов | `/usr/share/xray/` | `/usr/local/share/xray/` |
 | Логи Xray | `/var/log/` | `/var/log/` |
-| LED | UCI + sysfs (Cudy WR3000S) | sysfs (автоопределение) |
+| LED | `setup-led-status.sh` | — |
+| Диагностика | `diagnose-xray-tproxy.sh` | `xpower status` / `xpower test` |
+| CLI | — | `xpower` (`/usr/local/bin`) |
 
 ### Выбор профиля подписки
 
@@ -236,6 +267,16 @@ xpower version
 
 ## Управление сервисом
 
+Удобнее через `xpower` (см. раздел CLI):
+
+```sh
+xpower status      # состояние шлюза
+xpower restart     # перезапуск
+xpower test        # проверка DNS, TProxy и выхода в интернет
+```
+
+Напрямую через systemd:
+
 ```sh
 # Запуск / остановка / перезапуск
 systemctl start xray
@@ -269,36 +310,68 @@ Cron (2:30) / systemd network hook
 ## Ручное обновление
 
 ```sh
-/usr/local/share/xray/update-xray.sh
+xpower update                    # то же, что и по cron, но сразу
+# или напрямую:
+sudo /usr/local/share/xray/update-xray.sh
 ```
 
 ## Структура файлов после установки
 
 ```text
-/usr/local/bin/xray                     # Исполняемый файл Xray
-/usr/local/share/xray/                  # Скрипты и geo-файлы
+/usr/local/bin/
+├── xray                                # исполняемый файл Xray
+└── xpower                              # CLI управления шлюзом
+/usr/local/share/xray/                  # скрипты и geo-файлы
 ├── xray-generate-config.py
 ├── xray-sub-parser.py
 ├── update-xray.sh
 ├── update-nft.sh
 ├── geoip.dat
 └── geosite.dat
-/etc/xray/                              # Конфигурация Xray
-├── config.json
-├── subscription.url
-├── hwid
-├── gateway_ip
-├── sub_user_agent      (опционально)
-├── sub_remarks         (опционально)
-└── state/              (SHA-кеш для инкрементальных обновлений)
+/etc/xray/
+├── settings.json                       # единственный источник настроек
+├── config.json                         # генерируется из подписки
+└── state/
+    ├── status.json                     # режим, причина DIRECT, профиль (для xpower)
+    ├── xray.zip.sha256sum              # SHA-кеши для инкрементальных обновлений
+    ├── geoip.dat.sha256sum
+    └── geosite.dat.sha256sum
 /etc/systemd/system/
 ├── xray.service
 ├── xray-network-update.service
 └── xray-network-update.path
+/etc/dnsmasq.conf                       # DNS-фронтенд на :53 → Xray dns-in
+/etc/crontab (crontab -l)               # ежедневное обновление в 2:30
 /var/log/
 ├── xray-access.log
 ├── xray-error.log
 └── xray-update.log
+```
+
+## Диагностика
+
+Начните с `xpower status` — он показывает сервис, nftables, policy routing, DNS, режим подписки и трафик по серверам. Затем `xpower test`.
+
+| Симптом | Что проверить |
+| --- | --- |
+| В `xpower status` «DIRECT — no_proxies» | Подписка вернула заглушки: исчерпан лимит устройств (адрес `0.0.0.0`, порт `1`, нулевой UUID) или список пуст. Отвяжите лишние устройства в личном кабинете провайдера и выполните `xpower update` |
+| В `xpower status` «DIRECT — expired» | В подписке сервер с адресом `hole` — срок действия истёк |
+| Нет интернета у клиентов, у шлюза есть | `xpower test`: если «TProxy не слушает» — `xpower restart`; если «nftables bypass: правило не найдено» — `xpower setup` |
+| Не открываются сайты по именам, по IP работают | DNS: `xpower test` покажет, отвечают ли dnsmasq :53 и Xray `dns-in`. Логи Xray — `journalctl -u xray -f` с `log.loglevel: "info"` и `log.dnsLog: true` |
+| После обновления не применился конфиг | Смотрите `/var/log/xray-update.log`: новый `config.json` не прошёл `xray run -test` — остался прежний рабочий конфиг |
+| Клиенты ходят напрямую вместо прокси | `xpower profile` — возможно, выбран профиль без рабочих серверов; профиль задаётся `subscription.remarks` |
+| Постоянные обрывы на одном сервере | `xpower proxy-list` и `xpower traffic`: балансировщик исключает узлы по RTT (`balancer.max_rtt`, `balancer.baselines`) |
+
+Проверить конфиг вручную:
+
+```sh
+/usr/local/bin/xray run -test -config /etc/xray/config.json
+```
+
+Принудительно пересобрать всё (Xray, geo, подписка, конфиг, nftables, перезапуск):
+
+```sh
+xpower update
 ```
 
 ## Лицензия
