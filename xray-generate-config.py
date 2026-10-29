@@ -159,7 +159,7 @@ def normalize_outbound(ob: dict) -> dict:
 def base_config() -> dict:
     """Возвращает базовую конфигурацию Xray с TProxy и DNS (параметры — из settings.json)"""
     tproxy_port = setting("xray.tproxy_port", 12345)
-    dns_in_port = setting("xray.dns_in_port", 5353)
+    dns_in_port = setting("xray.dns_in_port", 15353)
 
     # settings.json от старых версий: dns.servers был строкой "1.1.1.1 8.8.8.8",
     # а dns.hosts отсутствовал. Подставляем значения по умолчанию, иначе Xray

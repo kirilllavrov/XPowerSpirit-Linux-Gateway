@@ -624,7 +624,7 @@ apt-get install -y -qq dnsmasq 2>/dev/null || true
 # Порты и апстрим — из settings.json (единственный источник настроек)
 DNS_IN_PORT="$(settings_get '.xray.dns_in_port')"
 DNSMASQ_FALLBACK="$(settings_get '.dns.dnsmasq_fallback')"
-[ -n "$DNS_IN_PORT" ] || DNS_IN_PORT=5353
+[ -n "$DNS_IN_PORT" ] || DNS_IN_PORT=15353
 [ -n "$DNSMASQ_FALLBACK" ] || DNSMASQ_FALLBACK=77.88.8.8
 
 # Конфигурация dnsmasq: DNS-фронтенд, без DHCP

@@ -168,14 +168,16 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 ### DNS без утечек
 
 ```text
-Клиенты → dnsmasq :53 → Xray :5353 → dns-out (hijack) → dns-inbuilt (DoH)
+Клиенты → dnsmasq :53 → Xray :15353 → dns-out (hijack) → dns-inbuilt (DoH)
                                                        ├─ ru-домены → DoH Yandex
                                                        └─ остальные → DoH Cloudflare / comss.one / ffmuc.net
 
 Собственный DNS шлюза → 127.0.0.1:53 (тот же dnsmasq) → Xray
 ```
 
-`systemd-resolved` отключается при установке чтобы освободить порт 53 для dnsmasq, `/etc/resolv.conf` указывает на `127.0.0.1`. DHCP не раздаётся — этим занимается основной роутер (Keenetic).
+`systemd-resolved` отключается при установке чтобы освободить порт 53 для dnsmasq, `/etc/resolv.conf` указывает на `127.0.0.1`.
+
+Порт DNS-инбаунда Xray — `15353`, а не `5353`: `5353` зарегистрирован за mDNS, и его занимают сторонние сервисы (TorrServer/Bonjour, avahi, браузеры). Порт задаётся в `xray.dns_in_port`, установщик подставляет его же в `/etc/dnsmasq.conf`. DHCP не раздаётся — этим занимается основной роутер (Keenetic).
 
 Если Xray остановлен, dnsmasq отвечает через `dns.dnsmasq_fallback` (`77.88.8.8`) — клиенты не остаются без DNS.
 

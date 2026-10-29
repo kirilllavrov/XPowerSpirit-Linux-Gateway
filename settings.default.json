@@ -17,7 +17,7 @@
   "xray": {
     "gid": 990,
     "tproxy_port": 12345,
-    "dns_in_port": 5353,
+    "dns_in_port": 15353,
     "tproxy_mark": 1,
     "bypass_mark": 2,
     "tcp_keepalive_interval": 30,

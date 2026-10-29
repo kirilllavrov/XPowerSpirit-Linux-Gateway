@@ -259,7 +259,7 @@ dns_ok() {
 do_status() {
 	local tproxy_port dns_port
 	tproxy_port=$(inbound_port "tproxy-in" 12345)
-	dns_port=$(inbound_port "dns-in" 5353)
+	dns_port=$(inbound_port "dns-in" 15353)
 
 	echo ""
 	echo -e "${CYAN}=== XPowerSpirit Gateway ===${NC}"
@@ -412,7 +412,7 @@ else:
 
 do_test() {
 	local dns_port tproxy_port
-	dns_port=$(inbound_port "dns-in" 5353)
+	dns_port=$(inbound_port "dns-in" 15353)
 	tproxy_port=$(inbound_port "tproxy-in" 12345)
 
 	echo ""
