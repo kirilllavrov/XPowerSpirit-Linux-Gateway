@@ -115,6 +115,29 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | `xray-sub-parser.py` | Парсер JSON-подписки: выбор профиля, отбор прокси-серверов |
 | `xray-generate-config.py` | Генератор config.json: DNS, routing, балансировка |
 
+## Настройки
+
+Единственный источник настроек — `/etc/xray/settings.json` (создаётся из `settings.default.json` при установке). Скрипты и генератор **не содержат собственных значений** — всё берётся из этого файла. Если файл повреждён, генератор завершается с ошибкой, а не подставляет молча другие значения; если файла нет — используются встроенные умолчания с предупреждением в лог.
+
+| Ключ | Что задаёт |
+| --- | --- |
+| `subscription.url`, `.user_agent`, `.remarks` | подписка, User-Agent и выбранный профиль |
+| `xray.tproxy_port` | порт TProxy-инбаунда (`tunnel`) |
+| `xray.dns_in_port` | порт DNS-инбаунда, куда форвардит dnsmasq |
+| `xray.tproxy_mark` / `xray.bypass_mark` | метки TProxy и bypass в nftables и `sockopt.mark` |
+| `xray.tcp_keepalive_interval` | `sockopt.tcpKeepAliveInterval` у outbound'ов |
+| `xray.direct_domain_strategy` | `sockopt.domainStrategy` у выхода `direct` |
+| `log.loglevel`, `.access`, `.error` | логи Xray |
+| `dns.query_strategy`, `.serve_expired_ttl`, `.dnsmasq_fallback` | параметры DNS |
+| `dns.hosts` | статические IP DoH-серверов (они же bypass-адреса в nftables) |
+| `dns.servers` | список DNS-серверов встроенного DNS Xray |
+| `balancer.expected`, `.max_rtt`, `.baselines`, `.fallback_tag` | стратегия `leastLoad` |
+| `observatory.destination`, `.interval`, `.sampling`, `.timeout`, `.http_method` | `burstObservatory` |
+| `routing.domain_strategy` | `routing.domainStrategy` |
+| `routing.direct` / `.block` / `.proxy` / `.doh_bypass` | категории маршрутизации |
+
+Значения по умолчанию для отсутствующих ключей оставлены в коде только ради совместимости с `settings.json` от старых версий.
+
 ## Как работает
 
 ### Обработка трафика
@@ -138,9 +161,9 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 При нескольких серверах в подписке:
 
 - **leastLoad** — автоматический выбор самых стабильных серверов
-- **burstObservatory** — пинг `https://connectivitycheck.gstatic.com/generate_204` каждую минуту
-- Максимум 2 сервера, RTT до 800 мс
-- При падении всех — переход на прямой трафик (fallback → direct)
+- **burstObservatory** — пинг `connectivitycheck.gstatic.com/generate_204` (URL, интервал, число замеров — в `observatory`)
+- Сколько серверов использовать, отсечка по RTT и джиттеру — `balancer.expected`, `max_rtt`, `baselines`
+- При падении всех — переход на прямой трафик (`balancer.fallback_tag` → direct)
 - **Режим DIRECT**: если подписка истекла или в профиле не осталось рабочих серверов
   (например, исчерпан лимит устройств) — весь трафик идёт напрямую
 

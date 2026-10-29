@@ -26,18 +26,70 @@ import argparse
 # Переопределяется переменной окружения XRAY_SETTINGS_PATH (используется в тестах)
 SETTINGS_PATH = os.environ.get("XRAY_SETTINGS_PATH", "/etc/xray/settings.json")
 
+# settings.json — единственный источник настроек.
+# Значения по умолчанию ниже нужны только для settings.json от старых версий,
+# где соответствующих ключей ещё нет.
+DEFAULT_TCP_KEEPALIVE_INTERVAL = 30
+DEFAULT_DNS_SERVERS = [
+    {
+        "address": "https+local://common.dot.dns.yandex.net/dns-query",
+        "domains": ["geosite:category-ru"],
+        "expectedIPs": ["geoip:ru"],
+        "skipFallback": True
+    },
+    {
+        "address": "https+local://cloudflare-dns.com/dns-query",
+        "skipFallback": False
+    },
+    {
+        "address": "https+local://dns.nextdns.io",
+        "skipFallback": False
+    }
+]
+DEFAULT_DNS_HOSTS = {
+    "common.dot.dns.yandex.net": ["77.88.8.1", "77.88.8.8"],
+    "cloudflare-dns.com": ["1.0.0.1", "1.1.1.1"],
+    "dns.nextdns.io": ["45.90.28.0", "45.90.30.0"]
+}
+
+_settings_cache = None
+
+
 def load_settings() -> dict:
-    """Загружает settings.json или возвращает умолчания"""
-    try:
-        with open(SETTINGS_PATH) as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    """Загружает settings.json (единственный источник настроек)"""
+    global _settings_cache
+    if _settings_cache is None:
+        try:
+            with open(SETTINGS_PATH, encoding="utf-8") as f:
+                _settings_cache = json.load(f)
+        except FileNotFoundError:
+            print(f"  [!] {SETTINGS_PATH} не найден — используются значения по умолчанию",
+                  file=sys.stderr)
+            _settings_cache = {}
+        except Exception as e:
+            # Настройки — источник истины: битый файл нельзя молча игнорировать
+            print(f"  [X] Не удалось прочитать {SETTINGS_PATH}: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if not isinstance(_settings_cache, dict):
+            print(f"  [X] {SETTINGS_PATH}: ожидался JSON-объект", file=sys.stderr)
+            sys.exit(1)
+    return _settings_cache
+
+
+def setting(path: str, default=None):
+    """Читает значение по пути вида "xray.bypass_mark"; default — если ключа нет"""
+    node = load_settings()
+    for key in path.split("."):
+        if not isinstance(node, dict) or key not in node:
+            return default
+        node = node[key]
+    return default if node is None else node
+
 
 def load_routing() -> dict:
     """Загружает routing-категории из settings.json"""
-    s = load_settings()
-    return s.get("routing", {})
+    return setting("routing", {})
 
 def log_error(msg: str) -> None:
     """Выводит сообщение об ошибке в stderr"""
@@ -78,8 +130,9 @@ def normalize_outbound(ob: dict) -> dict:
     if "sockopt" not in ob["streamSettings"]:
         ob["streamSettings"]["sockopt"] = {}
 
-    ob["streamSettings"]["sockopt"]["mark"] = 2
-    ob["streamSettings"]["sockopt"]["tcpKeepAliveInterval"] = 30
+    ob["streamSettings"]["sockopt"]["mark"] = setting("xray.bypass_mark", 2)
+    ob["streamSettings"]["sockopt"]["tcpKeepAliveInterval"] = setting(
+        "xray.tcp_keepalive_interval", DEFAULT_TCP_KEEPALIVE_INTERVAL)
 
     _migrate_ws_host(ob)
 
@@ -96,46 +149,27 @@ def normalize_outbound(ob: dict) -> dict:
 # ============================================
 
 def base_config() -> dict:
-    """Возвращает базовую конфигурацию Xray с TProxy и DNS"""
-    s = load_settings()
-    tproxy_port = s.get("xray", {}).get("tproxy_port", 12345)
+    """Возвращает базовую конфигурацию Xray с TProxy и DNS (параметры — из settings.json)"""
+    tproxy_port = setting("xray.tproxy_port", 12345)
+    dns_in_port = setting("xray.dns_in_port", 5353)
 
     return {
         "log": {
-            "loglevel": "none",
-            "access": "/var/log/xray-access.log",
-            "error": "/var/log/xray-error.log"
+            "loglevel": setting("log.loglevel", "none"),
+            "access": setting("log.access", "/var/log/xray-access.log"),
+            "error": setting("log.error", "/var/log/xray-error.log")
         },
         "dns": {
             "tag": "dns-inbuilt",
-            "queryStrategy": "UseIPv4",
-            "disableCache": False,
-            "serveStale": True,
-            "serveExpiredTTL": 1800,
-            "disableFallback": False,
-            "disableFallbackIfMatch": True,
-            "enableParallelQuery": True,
-            "hosts": {
-                "common.dot.dns.yandex.net": ["77.88.8.1", "77.88.8.8"],
-                "cloudflare-dns.com": ["1.0.0.1", "1.1.1.1"],
-                "dns.nextdns.io": ["45.90.28.0", "45.90.30.0"]
-            },
-            "servers": [
-                {
-                    "address": "https+local://common.dot.dns.yandex.net/dns-query",
-                    "domains": ["geosite:category-ru"],
-                    "expectedIPs": ["geoip:ru"],
-                    "skipFallback": True
-                },
-                {
-                    "address": "https+local://cloudflare-dns.com/dns-query",
-                    "skipFallback": False
-                },
-                {
-                    "address": "https+local://dns.nextdns.io",
-                    "skipFallback": False
-                }
-            ]
+            "queryStrategy": setting("dns.query_strategy", "UseIPv4"),
+            "disableCache": setting("dns.disable_cache", False),
+            "serveStale": setting("dns.serve_stale", True),
+            "serveExpiredTTL": setting("dns.serve_expired_ttl", 1800),
+            "disableFallback": setting("dns.disable_fallback", False),
+            "disableFallbackIfMatch": setting("dns.disable_fallback_if_match", True),
+            "enableParallelQuery": setting("dns.enable_parallel_query", True),
+            "hosts": setting("dns.hosts", DEFAULT_DNS_HOSTS),
+            "servers": setting("dns.servers", DEFAULT_DNS_SERVERS)
         },
         "inbounds": [
             {
@@ -161,7 +195,7 @@ def base_config() -> dict:
             {
                 "tag": "dns-in",
                 "listen": "127.0.0.1",
-                "port": 5353,
+                "port": dns_in_port,
                 "protocol": "tunnel",
                 "settings": {
                     "allowedNetwork": "tcp,udp"
@@ -186,7 +220,7 @@ def build_direct_config() -> dict:
     direct_domains = rt.get("direct", {}).get("domains", [])
 
     cfg["routing"] = {
-        "domainStrategy": "IPOnDemand",
+        "domainStrategy": setting("routing.domain_strategy", "IPOnDemand"),
         "rules": [
             {
                 "type": "field",
@@ -342,33 +376,35 @@ def build_rules(proxy_outbounds: list) -> list:
 
 def build_balancer(proxy_outbounds: list) -> dict:
     """
-    Создаёт конфигурацию балансировщика для нескольких прокси (leastLoad).
-    leastLoad выбирает наиболее стабильные серверы на основе данных burstObservatory:
-      - expected=2: использовать 2 лучших сервера
-      - maxRTT=800ms: серверы с пингом >800ms исключаются
-      - baselines=["200ms"]: допустимое стандартное отклонение RTT (джиттер)
-
-    Если все серверы не проходят — fallback на direct.
+    Создаёт конфигурацию балансировщика (leastLoad) по параметрам из settings.json:
+      balancer.expected      — сколько лучших серверов использовать
+      balancer.max_rtt       — отсечка по максимальному RTT
+      balancer.baselines     — допустимое стандартное отклонение RTT (джиттер)
+      balancer.fallback_tag  — outbound, если недоступны все
     """
     selector = [ob["tag"] for ob in proxy_outbounds]
+    # expected не может превышать число серверов
+    expected = setting("balancer.expected", 2)
+    settings_block = {
+        "expected": min(int(expected), len(proxy_outbounds)),
+        "maxRTT": setting("balancer.max_rtt", "800ms"),
+        "baselines": setting("balancer.baselines", ["200ms"]),
+    }
+
     return {
         "tag": "balancer",
         "selector": selector,
         "strategy": {
             "type": "leastLoad",
-            "settings": {
-                "expected": min(2, len(proxy_outbounds)),
-                "maxRTT": "800ms",
-                "baselines": ["200ms"]
-            }
+            "settings": settings_block,
         },
-        "fallbackTag": "direct"
+        "fallbackTag": setting("balancer.fallback_tag", "direct"),
     }
 
 
 def build_burst_observatory(proxy_outbounds: list) -> dict:
     """
-    Создаёт конфигурацию burstObservatory для мониторинга прокси.
+    Создаёт burstObservatory по параметрам из settings.json (секция observatory).
     Используется со стратегией leastLoad.
     """
     subject_selector = [ob["tag"] for ob in proxy_outbounds]
@@ -376,11 +412,12 @@ def build_burst_observatory(proxy_outbounds: list) -> dict:
         "burstObservatory": {
             "subjectSelector": subject_selector,
             "pingConfig": {
-                "destination": "https://connectivitycheck.gstatic.com/generate_204",
-                "interval": "1m",
-                "sampling": 10,
-                "timeout": "15s",
-                "httpMethod": "GET"
+                "destination": setting("observatory.destination",
+                                       "https://connectivitycheck.gstatic.com/generate_204"),
+                "interval": setting("observatory.interval", "1m"),
+                "sampling": setting("observatory.sampling", 10),
+                "timeout": setting("observatory.timeout", "15s"),
+                "httpMethod": setting("observatory.http_method", "GET"),
             }
         }
     }
@@ -395,7 +432,12 @@ def _default_direct_outbound() -> dict:
         "protocol": "freedom",
         "tag": "direct",
         "streamSettings": {
-            "sockopt": {"mark": 2, "tcpKeepAliveInterval": 30, "domainStrategy": "UseIPv4"}
+            "sockopt": {
+                "mark": setting("xray.bypass_mark", 2),
+                "tcpKeepAliveInterval": setting(
+                    "xray.tcp_keepalive_interval", DEFAULT_TCP_KEEPALIVE_INTERVAL),
+                "domainStrategy": setting("xray.direct_domain_strategy", "UseIPv4"),
+            }
         }
     }
 
@@ -427,7 +469,10 @@ def assemble_config(proxy_outbounds: list, output_path: str):
     if len(proxy_outbounds) > 1:
         cfg.update(build_burst_observatory(proxy_outbounds))
 
-    routing = {"domainStrategy": "IPOnDemand", "rules": build_rules(proxy_outbounds)}
+    routing = {
+        "domainStrategy": setting("routing.domain_strategy", "IPOnDemand"),
+        "rules": build_rules(proxy_outbounds),
+    }
 
     if len(proxy_outbounds) > 1:
         routing["balancers"] = [build_balancer(proxy_outbounds)]

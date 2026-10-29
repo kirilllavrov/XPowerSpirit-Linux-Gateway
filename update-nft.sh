@@ -28,11 +28,9 @@ SETTINGS_JSON="/etc/xray/settings.json"
 # Пример с несколькими портами: LOCAL_TCP_PORTS="8090 8091 8443"
 LOCAL_TCP_PORTS="8090"
 
-# DoH-серверы (ДОЛЖНЫ совпадать с hosts в xray-generate-config.py)
-#   common.dot.dns.yandex.net → 77.88.8.1, 77.88.8.8
-#   cloudflare-dns.com        → 1.0.0.1, 1.1.1.1
-#   dns.nextdns.io            → 45.90.28.0, 45.90.30.0
-DNS_IPS="77.88.8.8 77.88.8.1 1.1.1.1 1.0.0.1 45.90.28.0 45.90.30.0"
+# IP DoH-серверов заполняются ниже из settings.json (dns.hosts) —
+# это те же адреса, что генератор кладёт в hosts встроенного DNS
+DNS_IPS=""
 
 # ============================================
 #   HELPER: чтение settings.json
@@ -54,6 +52,14 @@ if [ -f "$SETTINGS_JSON" ]; then
 
 	_bmark=$(settings_get '.xray.bypass_mark')
 	[ -n "$_bmark" ] && BYPASS_MARK="$_bmark"
+fi
+
+# IP DoH-серверов — из settings.json (dns.hosts), чтобы не дублировать их в коде
+if [ -f "$SETTINGS_JSON" ]; then
+	DNS_IPS=$(jq -r '.dns.hosts // {} | .[] | .[]' "$SETTINGS_JSON" 2>/dev/null | sort -u | tr '\n' ' ')
+fi
+if [ -z "${DNS_IPS// /}" ]; then
+	echo "[!] settings.json: dns.hosts пуст — DoH-bypass в nftables отключён" >&2
 fi
 
 # ============================================

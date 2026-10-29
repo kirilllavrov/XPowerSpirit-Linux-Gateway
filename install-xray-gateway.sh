@@ -620,10 +620,16 @@ else
 echo "=== Установка dnsmasq ==="
 apt-get install -y -qq dnsmasq 2>/dev/null || true
 
+# Порты и апстрим — из settings.json (единственный источник настроек)
+DNS_IN_PORT="$(settings_get '.xray.dns_in_port')"
+DNSMASQ_FALLBACK="$(settings_get '.dns.dnsmasq_fallback')"
+[ -n "$DNS_IN_PORT" ] || DNS_IN_PORT=5353
+[ -n "$DNSMASQ_FALLBACK" ] || DNSMASQ_FALLBACK=77.88.8.8
+
 # Конфигурация dnsmasq: DNS-фронтенд, без DHCP
 cat >/etc/dnsmasq.conf <<'DNSMASQ_EOF'
 # Xray Transparent Gateway — DNS-фронтенд
-# Принимает запросы клиентов на :53, форвардит в Xray dns-in на :5353
+# Принимает запросы клиентов на :53, форвардит в Xray dns-in на :DNS_IN_PORT_PLACEHOLDER
 
 # Не использовать /etc/resolv.conf
 no-resolv
@@ -635,9 +641,9 @@ bind-interfaces
 # Не раздавать DHCP
 no-dhcp-interface=LAN_IF_PLACEHOLDER
 
-# DNS-серверы: сначала Xray (:5353), потом fallback
-server=127.0.0.1#5353
-server=77.88.8.8
+# DNS-серверы: сначала Xray, потом fallback
+server=127.0.0.1#DNS_IN_PORT_PLACEHOLDER
+server=DNSMASQ_FALLBACK_PLACEHOLDER
 
 # Кеш
 cache-size=1000
@@ -652,12 +658,14 @@ local=/lan/
 stop-dns-rebind
 DNSMASQ_EOF
 
-# Подставляем реальный интерфейс
+# Подставляем реальный интерфейс, порт dns-in и fallback-сервер
 sed -i "s/LAN_IF_PLACEHOLDER/$LAN_IF/g" /etc/dnsmasq.conf
+sed -i "s/DNS_IN_PORT_PLACEHOLDER/$DNS_IN_PORT/g" /etc/dnsmasq.conf
+sed -i "s/DNSMASQ_FALLBACK_PLACEHOLDER/$DNSMASQ_FALLBACK/g" /etc/dnsmasq.conf
 
 # Перезапускаем dnsmasq с новым конфигом — ДО того как сломаем systemd-resolved
 systemctl restart dnsmasq 2>/dev/null || true
-echo "  → dnsmasq запущен на :53 → :5353"
+echo "  → dnsmasq запущен на :53 → :$DNS_IN_PORT"
 
 # Отключаем systemd-resolved чтобы освободить порт 53
 # ВАЖНО: dnsmasq УЖЕ слушает :53, поэтому переключение resolv.conf безопасно
