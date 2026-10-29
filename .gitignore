@@ -1,6 +1,7 @@
 __pycache__/
 Dockerfile.test
 xray-config-links.md
+test-amd64.sh
 .github/
 
 .codebase-memory/

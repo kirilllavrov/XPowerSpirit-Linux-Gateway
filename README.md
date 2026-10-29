@@ -115,7 +115,6 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | `update-nft.sh` | Применение правил nftables TProxy |
 | `xray-sub-parser.py` | Парсер подписок: Base64 VLESS + JSON Happ/Sing-box |
 | `xray-generate-config.py` | Генератор config.json: DNS, routing, балансировка |
-| `test-amd64.sh` | Самопроверка: парсер → генератор → `xray run -test` (в контейнере) |
 
 ## Как работает
 
