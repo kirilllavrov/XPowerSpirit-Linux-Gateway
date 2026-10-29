@@ -17,6 +17,7 @@ DIRECT-режим:
 import json
 import os
 import sys
+import time
 import argparse
 
 # ============================================
@@ -25,6 +26,8 @@ import argparse
 
 # Переопределяется переменной окружения XRAY_SETTINGS_PATH (используется в тестах)
 SETTINGS_PATH = os.environ.get("XRAY_SETTINGS_PATH", "/etc/xray/settings.json")
+CONFIG_DIR = os.path.dirname(SETTINGS_PATH) or "/etc/xray"
+STATE_DIR = os.path.join(CONFIG_DIR, "state")
 
 # settings.json — единственный источник настроек.
 # Значения по умолчанию ниже нужны только для settings.json от старых версий,
@@ -158,7 +161,7 @@ def base_config() -> dict:
     tproxy_port = setting("xray.tproxy_port", 12345)
     dns_in_port = setting("xray.dns_in_port", 5353)
 
-    return {
+    base = {
         "log": {
             "loglevel": setting("log.loglevel", "none"),
             "access": setting("log.access", "/var/log/xray-access.log"),
@@ -208,6 +211,47 @@ def base_config() -> dict:
             }
         ]
     }
+
+    # Статистика и API: нужны `xpower status` / `xpower traffic`.
+    # Упрощённый режим (api.listen) не требует отдельного inbound и правила
+    # роутинга; ключи статистики — outbound>>>tag>>>traffic>>>uplink|downlink.
+    if setting("api.enabled", True):
+        base["stats"] = {}
+        base["api"] = {
+            "tag": "api",
+            "listen": f"127.0.0.1:{setting('api.listen_port', 10085)}",
+            "services": ["StatsService"],
+        }
+        base["policy"] = {
+            "system": {
+                "statsInboundUplink": True,
+                "statsInboundDownlink": True,
+                "statsOutboundUplink": True,
+                "statsOutboundDownlink": True,
+            }
+        }
+
+    return base
+
+
+def write_status(mode: str, servers: int, reason: str, profile: str) -> None:
+    """
+    Пишет состояние подписки в <CONFIG_DIR>/state/status.json — его читает
+    `xpower status`, чтобы показать режим, причину DIRECT-режима и профиль.
+    """
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        payload = {
+            "updated": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "mode": mode,
+            "servers": servers,
+            "reason": reason,
+            "profile": profile,
+        }
+        with open(os.path.join(STATE_DIR, "status.json"), "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log_error(f"  [!] Не удалось записать status.json: {e}")
 
 
 def build_direct_config() -> dict:
@@ -528,15 +572,19 @@ def main():
     if hole or not proxy_outbounds:
         if hole:
             print("  [!] Подписка истекла (сервер 'hole').", file=sys.stderr)
+            reason = "expired"
         else:
             print("  [!] В профиле нет рабочих серверов "
                   "(лимит устройств или заглушки).", file=sys.stderr)
+            reason = "no_proxies"
         print("  [!] Включаем DIRECT-режим (весь трафик напрямую).", file=sys.stderr)
         write_config(build_direct_config(), args.output)
+        write_status("direct", 0, reason, data.get("remarks", ""))
         print(f"  ✓ DIRECT-конфиг сохранён: {args.output}", file=sys.stderr)
         return
 
     assemble_config(proxy_outbounds, args.output)
+    write_status("proxy", len(proxy_outbounds), "", data.get("remarks", ""))
 
 
 if __name__ == "__main__":

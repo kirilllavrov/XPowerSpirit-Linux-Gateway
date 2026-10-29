@@ -1,4 +1,5 @@
 __pycache__/
+/state/
 Dockerfile.test
 xray-config-links.md
 test-amd64.sh

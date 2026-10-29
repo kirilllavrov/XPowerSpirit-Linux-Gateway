@@ -28,6 +28,10 @@
     "access": "/var/log/xray-access.log",
     "error": "/var/log/xray-error.log"
   },
+  "api": {
+    "enabled": true,
+    "listen_port": 10085
+  },
   "dns": {
     "query_strategy": "UseIPv4",
     "disable_cache": false,

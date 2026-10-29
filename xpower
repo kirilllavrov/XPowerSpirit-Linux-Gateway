@@ -1,0 +1,645 @@
+#!/bin/bash
+# XPowerSpirit Gateway CLI — управление прозрачным шлюзом Xray (TProxy)
+#
+# Использование:
+#   xpower status            Показать состояние шлюза
+#   xpower start|stop|restart|toggle
+#   xpower update            Обновить Xray, geo, подписку и конфиг
+#   xpower test              Проверить интернет, DNS, TProxy и маршрутизацию
+#   xpower traffic           Статистика трафика по серверам
+#   xpower logs              Логи Xray в реальном времени
+#   xpower config            Показать config.json
+#   xpower proxy-list        Список прокси-серверов из config.json
+#   xpower profile [ФИЛЬТР]  Показать или сменить профиль подписки
+#   xpower setup             Переприменить правила nftables
+#   xpower version           Версии CLI и Xray
+#
+# Каталог конфигурации можно переопределить: XPOWER_CONFIG_DIR=/etc/xray
+
+set -uo pipefail
+
+XPOWER_VERSION="1.0"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+CONFIG_DIR="${XPOWER_CONFIG_DIR:-/etc/xray}"
+CONFIG_JSON="${CONFIG_DIR}/config.json"
+SETTINGS_JSON="${CONFIG_DIR}/settings.json"
+# Состояние подписки (режим, причина DIRECT-режима, профиль) — пишет генератор
+STATUS_JSON="${CONFIG_DIR}/state/status.json"
+
+XRAY_BIN="${XPOWER_XRAY_BIN:-/usr/local/bin/xray}"
+UPDATE_SCRIPT="${XPOWER_UPDATE_SCRIPT:-/usr/local/share/xray/update-xray.sh}"
+NFT_SCRIPT="${XPOWER_NFT_SCRIPT:-/usr/local/share/xray/update-nft.sh}"
+SERVICE="${XPOWER_SERVICE:-xray}"
+
+usage() {
+	cat <<EOF
+XPowerSpirit Gateway — управление прозрачным шлюзом Xray
+
+Использование:
+  xpower status            Состояние шлюза (сервис, nftables, DNS, подписка, трафик)
+  xpower start             Запустить Xray
+  xpower stop              Остановить Xray
+  xpower restart           Перезапустить Xray
+  xpower toggle            Включить/выключить Xray
+  xpower update            Обновить Xray, geo, подписку и config.json
+  xpower test              Проверки: интернет, DNS, TProxy, маршрутизация
+  xpower traffic           Трафик по серверам (через API Xray)
+  xpower logs              Логи Xray в реальном времени
+  xpower config            Показать config.json
+  xpower proxy-list        Список прокси-серверов
+  xpower profile [ФИЛЬТР]  Показать профиль подписки или переключить на другой
+  xpower setup             Переприменить правила nftables
+  xpower version           Версии CLI и Xray
+EOF
+}
+
+# -----------------------------
+#   ЧТЕНИЕ КОНФИГУРАЦИИ
+# -----------------------------
+
+# json_get <файл> <python-выражение с переменной cfg>
+json_get() {
+	local file="$1" expr="$2"
+	[ -f "$file" ] || return 1
+	python3 -c "
+import json, sys
+try:
+    with open('$file', encoding='utf-8') as f:
+        cfg = json.load(f)
+    print($expr)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+# Порт инбаунда по тегу (из config.json)
+inbound_port() {
+	local tag="$1" fallback="$2"
+	local v
+	v=$(json_get "$CONFIG_JSON" "
+next((ib.get('port', $fallback) for ib in cfg.get('inbounds', []) if ib.get('tag') == '$tag'), $fallback)")
+	echo "${v:-$fallback}"
+}
+
+# Порт API (statsquery) из config.json → api.listen
+api_port() {
+	local v
+	v=$(json_get "$CONFIG_JSON" "
+str(cfg.get('api', {}).get('listen', '')).rsplit(':', 1)[-1] or 10085")
+	echo "${v:-10085}"
+}
+
+settings_get() {
+	local key="$1"
+	json_get "$SETTINGS_JSON" "cfg.get('$key', '')"
+}
+
+human_bytes() {
+	awk -v b="${1:-0}" 'BEGIN {
+		split("B KB MB GB TB", u, " ");
+		i = 1;
+		while (b >= 1024 && i < 5) { b /= 1024; i++ }
+		printf (i == 1 ? "%.0f %s" : "%.1f %s"), b, u[i];
+	}'
+}
+
+svc_active() {
+	systemctl is-active --quiet "$SERVICE" 2>/dev/null
+}
+
+need_root() {
+	[ "$(id -u)" -eq 0 ] && return 0
+	if ! sudo -n true 2>/dev/null; then
+		echo -e "${YELLOW}Для этой команды нужны права root${NC}" >&2
+		return 1
+	fi
+}
+
+run_root() {
+	if [ "$(id -u)" -eq 0 ]; then
+		"$@"
+	else
+		sudo "$@"
+	fi
+}
+
+# -----------------------------
+#   СТАТИСТИКА ТРАФИКА (API)
+# -----------------------------
+
+# Печатает: "TOTAL <up> <down>", затем "NODE <tag> <up> <down>" по каждому серверу
+traffic_stats() {
+	[ -x "$XRAY_BIN" ] || return 1
+
+	local raw
+	raw="$("$XRAY_BIN" api statsquery --server="127.0.0.1:$(api_port)" -pattern "" 2>/dev/null)" || return 1
+	[ -n "$raw" ] || return 1
+
+	printf '%s' "$raw" | python3 -c '
+import json, re, sys
+
+raw = sys.stdin.read()
+pairs = []
+
+try:
+    data = json.loads(raw)
+except Exception:
+    data = None
+
+if isinstance(data, dict):
+    items = data.get("stat") or []
+elif isinstance(data, list):
+    items = data
+else:
+    items = []
+
+for st in items:
+    if isinstance(st, dict):
+        pairs.append((str(st.get("name", "")), int(st.get("value", 0) or 0)))
+
+# Фолбэк для текстового (protobuf) вывода: stat: < name: "..." value: N >
+if not pairs:
+    for chunk in raw.split("name:"):
+        if "value:" not in chunk:
+            continue
+        quoted = chunk.split(chr(34))
+        vm = re.search(r"value:\s*(\d+)", chunk)
+        if len(quoted) > 1 and vm:
+            pairs.append((quoted[1], int(vm.group(1))))
+
+if not pairs:
+    sys.exit(1)
+
+SERVICE_TAGS = {"api", "direct", "block", "dns-out", "dns-in", "tproxy-in", "balancer"}
+total_up = 0
+total_down = 0
+nodes = {}
+
+for name, value in pairs:
+    parts = name.split(">>>")
+    if len(parts) != 4 or parts[2] != "traffic":
+        continue
+    kind, tag, _, direction = parts
+    if kind not in ("inbound", "outbound"):
+        continue
+    if direction == "uplink":
+        total_up += value
+    else:
+        total_down += value
+    if tag in SERVICE_TAGS:
+        continue
+    node = nodes.setdefault(tag, {"up": 0, "down": 0})
+    if direction == "uplink":
+        node["up"] += value
+    else:
+        node["down"] += value
+
+print("TOTAL %d %d" % (total_up, total_down))
+for tag, val in sorted(nodes.items(), key=lambda kv: kv[1]["up"] + kv[1]["down"], reverse=True):
+    print("NODE %s %d %d" % (tag, val["up"], val["down"]))
+' 2>/dev/null
+}
+
+# -----------------------------
+#   ПРОВЕРКИ DNS
+# -----------------------------
+
+dns_ok() {
+	local port="$1" name="${2:-example.com}"
+	if command -v dig >/dev/null 2>&1; then
+		dig +short +time=3 +tries=1 @127.0.0.1 -p "$port" "$name" 2>/dev/null | grep -q .
+	elif command -v nslookup >/dev/null 2>&1; then
+		nslookup -port="$port" "$name" 127.0.0.1 >/dev/null 2>&1
+	else
+		getent ahostsv4 "$name" >/dev/null 2>&1
+	fi
+}
+
+# -----------------------------
+#   КОМАНДЫ
+# -----------------------------
+
+do_status() {
+	local tproxy_port dns_port
+	tproxy_port=$(inbound_port "tproxy-in" 12345)
+	dns_port=$(inbound_port "dns-in" 5353)
+
+	echo ""
+	echo -e "${CYAN}=== XPowerSpirit Gateway ===${NC}"
+	echo ""
+
+	echo -n "  Сервис ($SERVICE): "
+	if svc_active; then
+		echo -e "${GREEN}● активен${NC}"
+	else
+		echo -e "${RED}○ остановлен${NC}"
+	fi
+
+	echo -n "  Xray Core:         "
+	if [ -x "$XRAY_BIN" ]; then
+		echo -e "${GREEN}$("$XRAY_BIN" version 2>/dev/null | head -1 | awk '{print $2}')${NC}"
+	else
+		echo -e "${RED}не установлен${NC}"
+	fi
+
+	echo -n "  Автообновление:    "
+	if crontab -l 2>/dev/null | grep -qF "$UPDATE_SCRIPT"; then
+		local sched
+		sched=$(crontab -l 2>/dev/null | grep -F "$UPDATE_SCRIPT" | head -1 | awk '{print $1" "$2" "$3" "$4" "$5}')
+		echo -e "${GREEN}● включено${NC} (cron: ${sched:-?})"
+	else
+		echo -e "${YELLOW}○ не настроено${NC}"
+	fi
+
+	echo -n "  nftables:          "
+	local rules nft_out
+	if nft_out=$(run_root nft list table inet xray 2>/dev/null); then
+		rules=$(printf '%s\n' "$nft_out" | grep -c '^[[:space:]]')
+		echo -e "${GREEN}● таблица inet xray${NC} (строк: $rules)"
+	else
+		echo -e "${RED}○ не настроена${NC}"
+	fi
+
+	echo -n "  Policy routing:    "
+	local mark
+	mark=$(settings_get "xray.tproxy_mark")
+	mark="${mark:-1}"
+	if ip rule show 2>/dev/null | grep -q "fwmark 0x$(printf '%x' "$mark") lookup 100"; then
+		echo -e "${GREEN}● fwmark $mark → table 100${NC}"
+	else
+		echo -e "${RED}○ не настроен${NC}"
+	fi
+
+	echo -n "  TProxy:            "
+	if ss -lntu 2>/dev/null | grep -q ":${tproxy_port} "; then
+		echo -e "${GREEN}● слушает :${tproxy_port}${NC}"
+	else
+		echo -e "${RED}○ не слушает :${tproxy_port}${NC}"
+	fi
+
+	echo -n "  DNS (dnsmasq :53): "
+	if svc_active 2>/dev/null && systemctl is-active --quiet dnsmasq 2>/dev/null; then
+		echo -e "${GREEN}● активен${NC} → Xray :${dns_port}"
+	elif systemctl is-active --quiet dnsmasq 2>/dev/null; then
+		echo -e "${YELLOW}● dnsmasq активен${NC} → Xray :${dns_port}"
+	else
+		echo -e "${RED}○ dnsmasq не запущен${NC}"
+	fi
+
+	echo -n "  config.json:       "
+	if [ -f "$CONFIG_JSON" ]; then
+		echo -e "${GREEN}● $(stat -c%s "$CONFIG_JSON" 2>/dev/null || echo '?') байт${NC}"
+	else
+		echo -e "${RED}○ отсутствует${NC}"
+	fi
+
+	echo -n "  Подписка:          "
+	if [ -f "$STATUS_JSON" ]; then
+		local line mode text
+		line=$(python3 -c "
+import json
+try:
+    with open('$STATUS_JSON', encoding='utf-8') as f:
+        s = json.load(f)
+    mode = str(s.get('mode', '?'))
+    when = (' (обновлено ' + str(s.get('updated', ''))[11:16] + ')') if len(str(s.get('updated', ''))) >= 16 else ''
+    profile = str(s.get('profile') or '—')
+    if mode == 'direct':
+        text = 'DIRECT — ' + (str(s.get('reason') or '') or 'причина неизвестна') + when
+    else:
+        text = 'прокси, серверов ' + str(s.get('servers', 0)) + ', профиль: ' + profile + when
+    print(mode + chr(9) + text)
+except Exception:
+    print('?' + chr(9) + 'нет данных')
+" 2>/dev/null)
+		IFS=$'\t' read -r mode text <<<"$line"
+		if [ "$mode" = "proxy" ]; then
+			echo -e "${GREEN}● ${text}${NC}"
+		elif [ "$mode" = "direct" ]; then
+			echo -e "${YELLOW}○ ${text}${NC}"
+		else
+			echo -e "${YELLOW}○ ${text}${NC}"
+		fi
+	else
+		echo -e "${YELLOW}○ нет данных${NC} (запустите: xpower update)"
+	fi
+
+	echo "  Балансировщик:"
+	if [ -f "$CONFIG_JSON" ]; then
+		python3 -c "
+import json
+with open('$CONFIG_JSON', encoding='utf-8') as f:
+    cfg = json.load(f)
+bal = (cfg.get('routing', {}).get('balancers') or [])
+if not bal:
+    out = [o for o in cfg.get('outbounds', []) if o.get('protocol') not in ('freedom', 'blackhole', 'dns')]
+    print('    (нет — прокси в конфиге: %d)' % len(out))
+else:
+    b = bal[0]
+    st = (b.get('strategy') or {})
+    ss = st.get('settings') or {}
+    print('    tag=%s, стратегия=%s, серверов=%d, expected=%s, maxRTT=%s, fallback=%s' % (
+        b.get('tag', '?'), st.get('type', '?'), len(b.get('selector') or []),
+        ss.get('expected', '?'), ss.get('maxRTT', '?'), b.get('fallbackTag', '—')))
+" 2>/dev/null || echo "    (ошибка чтения конфига)"
+	else
+		echo "    (config.json не найден)"
+	fi
+
+	echo "  Трафик:"
+	local stats
+	if stats="$(traffic_stats)"; then
+		printf "    Всего:  ↑ %s  ↓ %s\n" \
+			"$(human_bytes "$(echo "$stats" | awk '/^TOTAL/ {print $2}')")" \
+			"$(human_bytes "$(echo "$stats" | awk '/^TOTAL/ {print $3}')")"
+		local nodes
+		nodes=$(echo "$stats" | awk '/^NODE/ {print}' | head -5)
+		if [ -n "$nodes" ]; then
+			echo "    Серверы (топ-5):"
+			while read -r _ tag nup ndown; do
+				[ -n "${tag:-}" ] || continue
+				printf "      ${GREEN}●${NC} %-16s ↑ %s  ↓ %s\n" "$tag" "$(human_bytes "$nup")" "$(human_bytes "$ndown")"
+			done <<<"$nodes"
+		else
+			echo "    Серверы:  (трафика пока нет)"
+		fi
+	else
+		echo -e "    ${YELLOW}○ нет данных${NC} (Xray не запущен или api.enabled=false)"
+	fi
+
+	echo ""
+}
+
+do_test() {
+	local dns_port tproxy_port
+	dns_port=$(inbound_port "dns-in" 5353)
+	tproxy_port=$(inbound_port "tproxy-in" 12345)
+
+	echo ""
+	echo -e "${CYAN}=== Проверка шлюза ===${NC}"
+	echo ""
+
+	echo -n "  Интернет:          "
+	local ip
+	ip=$(curl -s --max-time 5 https://ifconfig.me/ip 2>/dev/null || true)
+	if [ -n "$ip" ]; then
+		echo -e "${GREEN}● ${ip}${NC}"
+	else
+		echo -e "${RED}○ нет соединения${NC}"
+	fi
+
+	echo -n "  DNS dnsmasq :53:   "
+	if dns_ok 53; then
+		echo -e "${GREEN}● отвечает${NC}"
+	else
+		echo -e "${RED}○ не отвечает${NC}"
+	fi
+
+	echo -n "  DNS Xray :${dns_port}:   "
+	if dns_ok "$dns_port"; then
+		echo -e "${GREEN}● отвечает${NC}"
+	else
+		echo -e "${YELLOW}○ не отвечает${NC}"
+	fi
+
+	echo -n "  TProxy :${tproxy_port}:     "
+	if ss -lntu 2>/dev/null | grep -q ":${tproxy_port} "; then
+		echo -e "${GREEN}● слушает${NC}"
+	else
+		echo -e "${RED}○ не слушает${NC}"
+	fi
+
+	echo -n "  Выход в интернет:  "
+	local status
+	status=$(curl -s --max-time 8 -o /dev/null -w '%{http_code}' \
+		http://connectivitycheck.gstatic.com/generate_204 2>/dev/null || true)
+	status="${status:-000}"
+	if [ "$status" = "204" ]; then
+		echo -e "${GREEN}● OK (HTTP 204)${NC}"
+	else
+		echo -e "${YELLOW}○ HTTP ${status}${NC}"
+	fi
+
+	echo -n "  nftables bypass:   "
+	local mark
+	mark=$(settings_get "xray.bypass_mark")
+	mark="${mark:-2}"
+	if run_root nft list table inet xray 2>/dev/null | grep -q "meta mark 0x$(printf '%x' "$mark")"; then
+		echo -e "${GREEN}● метка ${mark} исключается${NC}"
+	else
+		echo -e "${YELLOW}○ правило не найдено${NC}"
+	fi
+
+	echo -n "  config.json:       "
+	if [ -x "$XRAY_BIN" ] && [ -f "$CONFIG_JSON" ] &&
+		"$XRAY_BIN" run -test -config "$CONFIG_JSON" >/dev/null 2>&1; then
+		echo -e "${GREEN}● валиден${NC}"
+	else
+		echo -e "${RED}○ не проходит проверку${NC}"
+	fi
+
+	echo ""
+}
+
+do_traffic() {
+	echo ""
+	echo -e "${CYAN}=== Трафик XPowerSpirit ===${NC}"
+	echo ""
+
+	local stats
+	if ! stats="$(traffic_stats)"; then
+		echo "  нет данных: Xray не запущен или API отключён"
+		echo "  (проверьте: systemctl status $SERVICE; settings.json → api.enabled)"
+		echo ""
+		return 1
+	fi
+
+	printf "  Всего:  ↑ %s  ↓ %s\n" \
+		"$(human_bytes "$(echo "$stats" | awk '/^TOTAL/ {print $2}')")" \
+		"$(human_bytes "$(echo "$stats" | awk '/^TOTAL/ {print $3}')")"
+	echo ""
+
+	local nodes
+	nodes=$(echo "$stats" | awk '/^NODE/ {print}')
+	if [ -z "$nodes" ]; then
+		echo "  трафика через серверы пока не было"
+	else
+		printf "  %-18s %12s %12s\n" "сервер" "отдано" "принято"
+		while read -r _ tag nup ndown; do
+			[ -n "${tag:-}" ] || continue
+			printf "  %-18s %12s %12s\n" "$tag" "$(human_bytes "$nup")" "$(human_bytes "$ndown")"
+		done <<<"$nodes"
+	fi
+	echo ""
+}
+
+do_config() {
+	if [ ! -f "$CONFIG_JSON" ]; then
+		echo "config.json не найден: $CONFIG_JSON"
+		return 1
+	fi
+	local total
+	total=$(wc -l <"$CONFIG_JSON")
+	python3 -m json.tool "$CONFIG_JSON" 2>/dev/null | head -100
+	if [ "$total" -gt 100 ]; then
+		echo "... (ещё $((total - 100)) строк)"
+	fi
+}
+
+do_proxy_list() {
+	if [ ! -f "$CONFIG_JSON" ]; then
+		echo "config.json не найден: $CONFIG_JSON"
+		return 1
+	fi
+	python3 -c "
+import json
+
+SERVICE = ('freedom', 'blackhole', 'dns')
+with open('$CONFIG_JSON', encoding='utf-8') as f:
+    cfg = json.load(f)
+
+proxies = [o for o in cfg.get('outbounds', []) if o.get('protocol') not in SERVICE]
+print('Прокси-серверов: %d' % len(proxies))
+
+bal = (cfg.get('routing', {}).get('balancers') or [])
+if bal and len(proxies) > 1:
+    print('Балансировщик: %s (%s)' % (bal[0].get('tag', '?'), (bal[0].get('strategy') or {}).get('type', '?')))
+print()
+
+for o in proxies:
+    tag = o.get('tag', '?')
+    proto = o.get('protocol', '?')
+    ss = o.get('streamSettings') or {}
+    settings = o.get('settings') or {}
+    net = ss.get('network', '-')
+    sec = ss.get('security', 'none')
+
+    address = port = '-'
+    vnext = (settings.get('vnext') or [{}])[0]
+    if vnext.get('address'):
+        address, port = vnext.get('address'), vnext.get('port', '-')
+    elif settings.get('address'):
+        address, port = settings.get('address'), settings.get('port', '-')
+    else:
+        servers = (settings.get('servers') or [{}])[0]
+        if servers.get('address'):
+            address, port = servers.get('address'), servers.get('port', '-')
+
+    print('  [%s]  %s' % (tag, proto))
+    print('    Адрес:  %s:%s' % (address, port))
+    print('    Сеть:   %s / %s' % (net, sec))
+    print('    mark:   %s' % (ss.get('sockopt') or {}).get('mark', '—'))
+    print()
+" 2>/dev/null || echo "  (ошибка чтения конфига)"
+}
+
+do_profile() {
+	local filter="${1:-}"
+
+	if [ ! -f "$SETTINGS_JSON" ]; then
+		echo "settings.json не найден: $SETTINGS_JSON"
+		return 1
+	fi
+
+	local current
+	current=$(json_get "$SETTINGS_JSON" "cfg.get('subscription', {}).get('remarks', '')")
+
+	if [ -z "$filter" ]; then
+		echo ""
+		echo -e "${CYAN}=== Профиль подписки ===${NC}"
+		echo ""
+		if [ -n "$current" ]; then
+			echo "  Текущий: ${current}"
+		else
+			echo -e "  Текущий: ${YELLOW}не задан${NC} (берётся первый профиль подписки)"
+		fi
+		if [ -f "$STATUS_JSON" ]; then
+			local used
+			used=$(json_get "$STATUS_JSON" "cfg.get('profile', '')")
+			[ -n "$used" ] && echo "  Использован при генерации: ${used}"
+		fi
+		echo ""
+		echo "  Сменить:            xpower profile <фрагмент remarks>"
+		echo "  Сбросить (первый):  xpower profile --reset"
+		echo "  Доступные профили:  grep 'Доступные профили' /var/log/xray-update.log"
+		echo ""
+		return 0
+	fi
+
+	local new_value="$filter"
+	[ "$filter" = "--reset" ] && new_value=""
+	need_root || return 1
+
+	local tmp="${SETTINGS_JSON}.tmp.$$"
+	if jq --arg v "$new_value" '.subscription.remarks = $v' "$SETTINGS_JSON" >"$tmp" 2>/dev/null; then
+		run_root mv "$tmp" "$SETTINGS_JSON"
+		if [ -n "$new_value" ]; then
+			echo -e "${GREEN}Профиль подписки: ${new_value}${NC}"
+		else
+			echo -e "${GREEN}Профиль сброшен (будет использован первый из подписки)${NC}"
+		fi
+		echo "Примените изменения: xpower update"
+	else
+		rm -f "$tmp"
+		echo -e "${RED}Не удалось записать ${SETTINGS_JSON}${NC}"
+		return 1
+	fi
+}
+
+do_version() {
+	echo "xpower (XPowerSpirit Gateway CLI) ${XPOWER_VERSION}"
+	if [ -x "$XRAY_BIN" ]; then
+		"$XRAY_BIN" version 2>/dev/null | head -1
+	else
+		echo "Xray: не установлен"
+	fi
+}
+
+case "${1:-}" in
+status) do_status ;;
+start)
+	need_root && run_root systemctl start "$SERVICE" && echo "Xray запущен"
+	;;
+stop)
+	need_root && run_root systemctl stop "$SERVICE" && echo "Xray остановлен"
+	;;
+restart)
+	need_root && run_root systemctl restart "$SERVICE" && echo "Xray перезапущен"
+	;;
+toggle)
+	if svc_active; then
+		need_root && run_root systemctl stop "$SERVICE" && echo -e "${YELLOW}Xray остановлен${NC}"
+	else
+		need_root && run_root systemctl start "$SERVICE" && echo -e "${GREEN}Xray запущен${NC}"
+	fi
+	;;
+update)
+	need_root && run_root "$UPDATE_SCRIPT"
+	;;
+test) do_test ;;
+traffic) do_traffic ;;
+logs)
+	need_root && run_root journalctl -u "$SERVICE" -f
+	;;
+config) do_config ;;
+proxy-list) do_proxy_list ;;
+profile) do_profile "${2:-}" ;;
+setup)
+	need_root && run_root "$NFT_SCRIPT"
+	;;
+version | --version | -V) do_version ;;
+help | -h | --help) usage ;;
+*)
+	echo "Неизвестная команда: ${1:-}"
+	echo ""
+	usage
+	exit 1
+	;;
+esac

@@ -164,6 +164,9 @@ echo "  → /usr/local/share/xray удалён"
 rm -f /usr/local/bin/xray
 echo "  → /usr/local/bin/xray удалён"
 
+rm -f /usr/local/bin/xpower
+echo "  → /usr/local/bin/xpower удалён"
+
 # Логи
 rm -f /var/log/xray-update.log
 rm -f /var/log/xray-access.log

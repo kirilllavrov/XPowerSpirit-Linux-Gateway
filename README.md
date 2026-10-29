@@ -114,6 +114,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | `update-nft.sh` | Применение правил nftables TProxy |
 | `xray-sub-parser.py` | Парсер JSON-подписки: выбор профиля, отбор прокси-серверов |
 | `xray-generate-config.py` | Генератор config.json: DNS, routing, балансировка |
+| `xpower` | CLI управления шлюзом (статус, трафик, профиль, логи) |
 
 ## Настройки
 
@@ -204,6 +205,34 @@ grep 'Доступные профили' /var/log/xray-update.log
 ### Блокировка QUIC
 
 QUIC (UDP/443) блокируется чтобы браузеры использовали TCP/HTTPS (VLESS+XTLS не поддерживает UDP).
+
+## CLI: `xpower`
+
+Устанавливается в `/usr/local/bin/xpower`. Команды без `status`/`test`/`traffic`/`config`/`proxy-list`/`profile` требуют root.
+
+```sh
+xpower status            # состояние шлюза: сервис, nftables, policy routing,
+                         # DNS, профиль подписки, балансировщик, трафик
+xpower test              # интернет, DNS (dnsmasq :53 и Xray), TProxy,
+                         # выход в интернет, bypass-метка, валидность config.json
+xpower traffic           # трафик по серверам (через API Xray)
+xpower proxy-list        # прокси-серверы из config.json (адрес, сеть, TLS, mark)
+xpower profile           # какой профиль подписки выбран и какой использован
+xpower profile "LTE 1"   # переключить профиль (применить: xpower update)
+xpower start|stop|restart|toggle
+xpower update            # обновить Xray, geo, подписку и config.json
+xpower logs              # journalctl -u xray -f
+xpower config            # показать config.json
+xpower setup             # переприменить правила nftables
+xpower version
+```
+
+Для `status`/`traffic` в конфиг добавляются `stats`, `api` и `policy`
+(`api.enabled`, `api.listen_port` в `settings.json`; по умолчанию
+`127.0.0.1:10085`) — по ним Xray отдаёт счётчики
+`outbound>>>tag>>>traffic>>>uplink|downlink`. Генератор также пишет
+`/etc/xray/state/status.json` с режимом (proxy/direct), причиной DIRECT-режима,
+числом серверов и профилем — его читает `xpower status`.
 
 ## Управление сервисом
 
