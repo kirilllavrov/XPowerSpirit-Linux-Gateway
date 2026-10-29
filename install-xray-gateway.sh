@@ -16,8 +16,7 @@
 #   --mask=X.X.X.X   Маска подсети (по умолчанию 255.255.255.0)
 #   --gw=X.X.X.X     IP основного роутера
 #   --sub-ua=UA      User-Agent для подписки
-#   --remarks=FILTER Фильтр remarks в JSON-подписке
-#   --dwl=DOMAIN     Приоритетный домен для VLESS (Base64) подписок
+#   --remarks=FILTER Профиль из JSON-подписки (подстрока remarks, регистр не важен)
 #   --no-dns          Не настраивать DNS (dnsmasq, resolv.conf, systemd-resolved)
 
 set -e
@@ -153,7 +152,6 @@ LAN_MASK="255.255.255.0"
 GATEWAY_IP=""
 SUB_URL=""
 REMARKS_FILTER=""
-DWL_DOMAIN=""
 SKIP_DNS=0
 
 # ============================================
@@ -316,7 +314,6 @@ for arg in "$@"; do
 	--sub=*) SUB_URL="${arg#*=}" ;;
 	--sub-ua=*) SUB_USER_AGENT="${arg#*=}" ;;
 	--remarks=*) REMARKS_FILTER="${arg#*=}" ;;
-	--dwl=*) DWL_DOMAIN="${arg#*=}" ;;
 	--ip=*) ARG_IP="${arg#*=}" ;;
 	--mask=*) ARG_MASK="${arg#*=}" ;;
 	--gw=*) ARG_GW="${arg#*=}" ;;
@@ -561,14 +558,6 @@ settings_set '.network.ip' "$LAN_IP"
 settings_set '.network.mask' "$LAN_MASK"
 settings_set '.network.gateway' "$GATEWAY_IP"
 echo "[+] Сетевые параметры сохранены"
-
-# Сохраняем приоритетный домен
-if [ -n "$DWL_DOMAIN" ]; then
-	settings_set '.subscription.dwl_domain' "$DWL_DOMAIN"
-	echo "[+] Приоритетный домен: $DWL_DOMAIN"
-else
-	settings_set '.subscription.dwl_domain' ''
-fi
 
 # ============================================
 #   3. Настройка IP (статический или DHCP)

@@ -1,9 +1,7 @@
 #!/bin/bash
 # Ubuntu/Debian ARM — обновление Xray, geoip, geosite, подписки и config.json
 # Работает в режиме прозрачного шлюза
-# Поддерживает два формата подписки:
-#   - Base64 (VLESS URI)
-#   - JSON (Happ/Sing-box)
+# Подписка принимается только в формате JSON (массив конфигураций с remarks)
 
 set -e
 

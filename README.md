@@ -86,8 +86,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | `--mask=X.X.X.X` | Маска подсети (по умолчанию 255.255.255.0) |
 | `--gw=X.X.X.X` | IP основного роутера |
 | `--sub-ua=UA` | User-Agent для запроса подписки |
-| `--remarks=FILTER` | Фильтр по имени профиля в JSON-подписке |
-| `--dwl=DOMAIN` | Приоритетный домен для **Base64 VLESS** подписок |
+| `--remarks=FILTER` | Какой профиль взять из JSON-подписки (подстрока `remarks`, регистр не важен) |
 
 ### Зависимости
 
@@ -113,7 +112,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | `install-xray-gateway.sh` | Установщик (интерактивный + аргументы) |
 | `update-xray.sh` | Автообновление Xray, geo, подписки, конфига (cron + systemd) |
 | `update-nft.sh` | Применение правил nftables TProxy |
-| `xray-sub-parser.py` | Парсер подписок: Base64 VLESS + JSON Happ/Sing-box |
+| `xray-sub-parser.py` | Парсер JSON-подписки: выбор профиля, отбор прокси-серверов |
 | `xray-generate-config.py` | Генератор config.json: DNS, routing, балансировка |
 
 ## Как работает
@@ -139,10 +138,11 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 При нескольких серверах в подписке:
 
 - **leastLoad** — автоматический выбор самых стабильных серверов
-- **burstObservatory** — пинг `connectivitycheck.gstatic.com/generate_204` каждую минуту
+- **burstObservatory** — пинг `https://connectivitycheck.gstatic.com/generate_204` каждую минуту
 - Максимум 2 сервера, RTT до 800 мс
 - При падении всех — переход на прямой трафик (fallback → direct)
-- **Режим hole**: если подписка истекла — весь трафик идёт напрямую
+- **Режим DIRECT**: если подписка истекла или в профиле не осталось рабочих серверов
+  (например, исчерпан лимит устройств) — весь трафик идёт напрямую
 
 ### Защита от петель
 
@@ -165,15 +165,18 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | Логи Xray | `/var/log/` | `/var/log/` |
 | LED | UCI + sysfs (Cudy WR3000S) | sysfs (автоопределение) |
 
-### Выбор прокси-сервера — только для Base64 VLESS
+### Выбор профиля подписки
 
-Если подписка в формате **Base64 VLESS** и в ней несколько серверов, можно закрепиться за конкретным через `--dwl=DOMAIN` при установке или создав файл вручную:
+Подписка — это JSON-массив профилей (например: Автовыбор, Европа, Франция, LTE…). Каждый профиль содержит свой набор серверов, поэтому берётся ровно один:
+
+- без аргументов — **первый профиль** в подписке (в лог пишется, какой именно);
+- с `--remarks=ФРАГМЕНТ` — первый профиль, в чьём `remarks` встречается фрагмент (регистр не важен).
+
+Поведение сохраняется в `/etc/xray/settings.json` → `subscription.remarks`, поэтому автообновление использует тот же профиль. Посмотреть доступные имена можно в логе генерации:
 
 ```sh
-echo "my-proxy.example.com" > /etc/xray/dwl_domain
+grep 'Доступные профили' /var/log/xray-update.log
 ```
-
-Генератор прочитает файл и выберет сервер с указанным доменом вместо первого попавшегося. Для JSON-подписок (Happ/Sing-box) не используется — там работает балансировщик leastLoad.
 
 ### Блокировка QUIC
 
@@ -233,7 +236,6 @@ Cron (2:30) / systemd network hook
 ├── subscription.url
 ├── hwid
 ├── gateway_ip
-├── dwl_domain          (опционально)
 ├── sub_user_agent      (опционально)
 ├── sub_remarks         (опционально)
 └── state/              (SHA-кеш для инкрементальных обновлений)
