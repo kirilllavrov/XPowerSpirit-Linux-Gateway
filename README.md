@@ -155,6 +155,7 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | `observatory.destination`, `.interval`, `.sampling`, `.timeout`, `.http_method` | `burstObservatory` |
 | `routing.domain_strategy` | `routing.domainStrategy` |
 | `routing.direct` / `.block` / `.proxy` / `.doh_bypass` | категории маршрутизации |
+| `routing.direct.bittorrent` | `true` — незашифрованный BitTorrent идёт напрямую, `false` — по общим правилам (в прокси). Требует `sniffing` на инбаунде (включён в генерируемом конфиге) |
 | `geodata.dir`, `.geoip_url`, `.geosite_url` | откуда и куда качать geo-файлы |
 
 Значения по умолчанию для отсутствующих ключей оставлены в коде только ради совместимости с `settings.json` от старых версий.
@@ -164,6 +165,8 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 ### Обработка трафика
 
 Клиенты отправляют весь трафик на Xray-шлюз (прописано в DHCP основного роутера). nftables перехватывает трафик в цепочке PREROUTING и направляет в Xray через TProxy. Xray маршрутизирует: российские сайты — напрямую, зарубежные — через прокси, реклама — в блокировку.
+
+Незашифрованный BitTorrent распознаётся через `sniffing` и уходит напрямую (`routing.direct.bittorrent`). Это осознанный компромисс: BT не нагружает прокси, но пиры и DHT видят реальный IP шлюза. Для зашифрованного/обфусцированного BT (MSE, uTP) распознавание не работает — такой трафик идёт по общим правилам, то есть через прокси.
 
 ### DNS без утечек
 

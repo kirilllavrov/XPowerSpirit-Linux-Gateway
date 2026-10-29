@@ -354,6 +354,7 @@ def build_rules(proxy_outbounds: list) -> list:
     block_domains = rt.get("block", {}).get("domains", [])
     direct_ips = rt.get("direct", {}).get("ips", [])
     direct_domains = rt.get("direct", {}).get("domains", [])
+    direct_bittorrent = rt.get("direct", {}).get("bittorrent", True)
     proxy_domains = rt.get("proxy", {}).get("domains", [])
 
     rules = [
@@ -409,6 +410,17 @@ def build_rules(proxy_outbounds: list) -> list:
             "outboundTag": "direct"
         },
     ]
+
+    # Незашифрованный BitTorrent — напрямую.
+    # Требует sniffing.enabled на inbound'е (см. base_config), иначе правило
+    # не сработает. Правило стоит до прокси-правил, чтобы BT к зарубежным
+    # пирам не уходил в прокси.
+    if direct_bittorrent:
+        rules.append({
+            "type": "field",
+            "protocol": ["bittorrent"],
+            "outboundTag": "direct"
+        })
 
     if proxy_outbounds:
         use_balancer = len(proxy_outbounds) > 1

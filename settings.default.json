@@ -118,7 +118,8 @@
       "ips": [
         "geoip:ru",
         "geoip:private"
-      ]
+      ],
+      "bittorrent": true
     },
     "block": {
       "domains": [
