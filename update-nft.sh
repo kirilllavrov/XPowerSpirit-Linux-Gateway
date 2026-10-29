@@ -228,12 +228,17 @@ setup_network() {
 	# 5. NTP (порт 123) — не трогаем
 	nft add rule "$TABLE_NAME" xray_output udp dport 123 return
 
+	# 5.1. ICMP — Xray его не проксирует (TProxy в prerouting ловит только tcp/udp),
+	#      поэтому с меткой TPROXY_MARK пакет уходит в lo и теряется.
+	#      Без этого правила ping/traceroute с самого шлюза не работают.
+	nft add rule "$TABLE_NAME" xray_output meta l4proto icmp return
+
 	# 6. Отбрасываем IPv6 исходящий (шлюз — IPv4-only)
 	nft add rule "$TABLE_NAME" xray_output meta nfproto ipv6 drop
 
 	# 7. Выход в интернет: шлюз проксирует СОБСТВЕННЫЙ трафик через Xray
 	#     mark=TPROXY_MARK → policy routing (таблица 100 → lo) → PREROUTING → TProxy
-	#     Исключения (Xray, DNS, NTP, локальное, IPv6) уже отсеяны в правилах 1-6.
+	#     Исключения (Xray, DNS, NTP, ICMP, локальное, IPv6) уже отсеяны в правилах 1-6.
 	#     Чтобы отключить проксирование шлюза — закомментируйте строку ниже.
 	nft add rule "$TABLE_NAME" xray_output meta mark set "$TPROXY_MARK" accept
 
