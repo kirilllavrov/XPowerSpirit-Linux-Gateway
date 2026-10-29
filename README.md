@@ -115,7 +115,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 | `update-nft.sh` | Применение правил nftables TProxy |
 | `xray-sub-parser.py` | Парсер подписок: Base64 VLESS + JSON Happ/Sing-box |
 | `xray-generate-config.py` | Генератор config.json: DNS, routing, балансировка |
-| `setup-led-status.sh` | LED-индикация Xray и интернета (GPIO/sysfs) |
+| `test-amd64.sh` | Самопроверка: парсер → генератор → `xray run -test` (в контейнере) |
 
 ## Как работает
 
@@ -227,7 +227,6 @@ Cron (2:30) / systemd network hook
 ├── xray-sub-parser.py
 ├── update-xray.sh
 ├── update-nft.sh
-├── net-check.sh
 ├── geoip.dat
 └── geosite.dat
 /etc/xray/                              # Конфигурация Xray

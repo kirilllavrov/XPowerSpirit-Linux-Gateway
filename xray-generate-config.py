@@ -15,6 +15,7 @@ Xray Config Generator for DietPi (Debian ARM) TProxy
 """
 
 import json
+import os
 import sys
 import re
 import argparse
@@ -23,7 +24,8 @@ import argparse
 #   КОНФИГУРАЦИЯ
 # ============================================
 
-SETTINGS_PATH = "/etc/xray/settings.json"
+# Переопределяется переменной окружения XRAY_SETTINGS_PATH (используется в тестах)
+SETTINGS_PATH = os.environ.get("XRAY_SETTINGS_PATH", "/etc/xray/settings.json")
 
 def load_settings() -> dict:
     """Загружает settings.json или возвращает умолчания"""
@@ -69,7 +71,7 @@ def normalize_tag(tag: str) -> str:
 def normalize_outbound(ob: dict) -> dict:
     """
     Дополняет outbound из подписки недостающими полями.
-    Добавляет sockopt (mark, tcpNoDelay, tcpKeepAliveInterval) и отключает mux.
+    Добавляет sockopt (mark, tcpKeepAliveInterval) и отключает mux.
     """
     # Убеждаемся, что streamSettings существует
     if "streamSettings" not in ob:
@@ -80,7 +82,6 @@ def normalize_outbound(ob: dict) -> dict:
         ob["streamSettings"]["sockopt"] = {}
 
     ob["streamSettings"]["sockopt"]["mark"] = 2
-    ob["streamSettings"]["sockopt"]["tcpNoDelay"] = True
     ob["streamSettings"]["sockopt"]["tcpKeepAliveInterval"] = 30
 
     # Отключаем mux (не нужен для TProxy)
@@ -264,7 +265,6 @@ def normalize_vless_outbound(ob: dict, chosen_tag: str) -> dict:
     sockopt = ss.setdefault("sockopt", {})
     sockopt["mark"] = 2
     sockopt["tcpKeepAliveInterval"] = 30
-    sockopt["tcpNoDelay"] = True
     ob.setdefault("mux", {"enabled": False})
 
     return ob
@@ -321,9 +321,9 @@ def base_config() -> dict:
                 "tag": "tproxy-in",
                 "listen": "0.0.0.0",
                 "port": tproxy_port,
-                "protocol": "dokodemo-door",
+                "protocol": "tunnel",
                 "settings": {
-                    "network": "tcp,udp",
+                    "allowedNetwork": "tcp,udp",
                     "followRedirect": True
                 },
                 "streamSettings": {
@@ -341,9 +341,9 @@ def base_config() -> dict:
                 "tag": "dns-in",
                 "listen": "127.0.0.1",
                 "port": 5353,
-                "protocol": "dokodemo-door",
+                "protocol": "tunnel",
                 "settings": {
-                    "network": "tcp,udp"
+                    "allowedNetwork": "tcp,udp"
                 }
             }
         ]
@@ -417,7 +417,7 @@ def build_dns_outbound() -> dict:
             "rules": [
                 {
                     "action": "hijack",
-                    "qtype": "1,28"
+                    "qType": "1,28"
                 }
             ]
         }
@@ -555,7 +555,7 @@ def build_burst_observatory(proxy_outbounds: list) -> dict:
         "burstObservatory": {
             "subjectSelector": subject_selector,
             "pingConfig": {
-                "destination": "http://connectivitycheck.gstatic.com/generate_204",
+                "destination": "https://connectivitycheck.gstatic.com/generate_204",
                 "interval": "1m",
                 "sampling": 10,
                 "timeout": "15s",
@@ -573,8 +573,9 @@ def _default_direct_outbound() -> dict:
     return {
         "protocol": "freedom",
         "tag": "direct",
-        "settings": {"domainStrategy": "UseIPv4"},
-        "streamSettings": {"sockopt": {"mark": 2, "tcpKeepAliveInterval": 30}}
+        "streamSettings": {
+            "sockopt": {"mark": 2, "tcpKeepAliveInterval": 30, "domainStrategy": "UseIPv4"}
+        }
     }
 
 def _default_block_outbound() -> dict:

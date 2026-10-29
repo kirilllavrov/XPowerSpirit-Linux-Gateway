@@ -242,7 +242,7 @@ def parse_vless_uri(uri: str, idx: int):
     if network == "ws":
         ws = {"path": path}
         if host_header:
-            ws["headers"] = {"Host": host_header}
+            ws["host"] = host_header
         stream["wsSettings"] = ws
 
     elif network == "grpc":
