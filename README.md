@@ -203,23 +203,6 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 - в `OUTPUT` дополнительно работает `meta skgid <xray.gid>` — трафик процессов группы `xray` помечается bypass-меткой (работает даже если `sockopt.mark` не применился);
 - к локальным адресам (`fib daddr type local`), приватным сетям, DoH-серверам, NTP и DHCP правила не применяются вовсе.
 
-### Отличия от OpenWRT-версии
-
-| Компонент | OpenWRT | DietPi (этот проект) |
-| --- | --- | --- |
-| Пакетный менеджер | opkg | apt |
-| Сетевой конфиг | UCI | `/etc/network/interfaces` |
-| Сервис-менеджер | procd/init.d | systemd |
-| DNS | dnsmasq (UCI) | dnsmasq (`/etc/dnsmasq.conf`) |
-| nftables | таблица `inet fw4` | отдельная таблица `inet xray` |
-| Hotplug | `/etc/hotplug.d/` | systemd `.path` unit |
-| Путь Xray | `/usr/bin/xray` | `/usr/local/bin/xray` |
-| Путь скриптов | `/usr/share/xray/` | `/usr/local/share/xray/` |
-| Логи Xray | `/var/log/` | `/var/log/` |
-| LED | `setup-led-status.sh` | — |
-| Диагностика | `diagnose-xray-tproxy.sh` | `xpower status` / `xpower test` |
-| CLI | — | `xpower` (`/usr/local/bin`) |
-
 ### Выбор профиля подписки
 
 Подписка — это JSON-массив профилей (например: Автовыбор, Европа, Франция, LTE…). Каждый профиль содержит свой набор серверов, поэтому берётся ровно один:
