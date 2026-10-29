@@ -149,7 +149,7 @@ bash install-xray-gateway.sh --sub=https://your-subscription.url
 ```text
 Клиенты → dnsmasq :53 → Xray :5353 → dns-out (hijack) → dns-inbuilt (DoH)
                                                        ├─ ru-домены → DoH Yandex
-                                                       └─ остальные → DoH Cloudflare / NextDNS
+                                                       └─ остальные → DoH Cloudflare / HaGeZi
 
 Шлюз (собственный DNS) → 1.0.0.1 (напрямую через основной роутер)
 ```

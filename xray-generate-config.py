@@ -42,14 +42,14 @@ DEFAULT_DNS_SERVERS = [
         "skipFallback": False
     },
     {
-        "address": "https+local://dns.nextdns.io",
+        "address": "https+local://juuri.hagezi.org/dns-query",
         "skipFallback": False
     }
 ]
 DEFAULT_DNS_HOSTS = {
     "common.dot.dns.yandex.net": ["77.88.8.1", "77.88.8.8"],
     "cloudflare-dns.com": ["1.0.0.1", "1.1.1.1"],
-    "dns.nextdns.io": ["45.90.28.0", "45.90.30.0"]
+    "juuri.hagezi.org": ["95.217.163.17"]
 }
 
 _settings_cache = None
