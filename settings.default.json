@@ -46,8 +46,14 @@
         "1.0.0.1",
         "1.1.1.1"
       ],
-      "juuri.hagezi.org": [
-        "95.217.163.17"
+      "dns.comss.one": [
+        "185.146.157.78",
+        "195.133.25.16",
+        "212.109.195.93",
+        "212.109.221.20"
+      ],
+      "doh.ffmuc.net": [
+        "5.1.66.255"
       ]
     },
     "servers": [
@@ -66,7 +72,11 @@
         "skipFallback": false
       },
       {
-        "address": "https+local://juuri.hagezi.org/dns-query",
+        "address": "https+local://dns.comss.one/dns-query",
+        "skipFallback": false
+      },
+      {
+        "address": "https+local://doh.ffmuc.net/dns-query",
         "skipFallback": false
       }
     ]
@@ -124,7 +134,8 @@
       "dns.google",
       "dns.quad9.net",
       "doh.opendns.com",
-      "juuri.hagezi.org"
+      "dns.comss.one",
+      "doh.ffmuc.net"
     ]
   }
 }

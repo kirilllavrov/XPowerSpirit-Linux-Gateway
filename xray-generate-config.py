@@ -42,14 +42,19 @@ DEFAULT_DNS_SERVERS = [
         "skipFallback": False
     },
     {
-        "address": "https+local://juuri.hagezi.org/dns-query",
+        "address": "https+local://dns.comss.one/dns-query",
+        "skipFallback": False
+    },
+    {
+        "address": "https+local://doh.ffmuc.net/dns-query",
         "skipFallback": False
     }
 ]
 DEFAULT_DNS_HOSTS = {
     "common.dot.dns.yandex.net": ["77.88.8.1", "77.88.8.8"],
     "cloudflare-dns.com": ["1.0.0.1", "1.1.1.1"],
-    "juuri.hagezi.org": ["95.217.163.17"]
+    "dns.comss.one": ["185.146.157.78", "195.133.25.16", "212.109.195.93", "212.109.221.20"],
+    "doh.ffmuc.net": ["5.1.66.255"]
 }
 
 _settings_cache = None
