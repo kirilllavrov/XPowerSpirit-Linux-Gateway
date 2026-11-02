@@ -159,7 +159,7 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | `routing.domain_strategy` | `routing.domainStrategy` |
 | `routing.direct` / `.block` / `.proxy` / `.doh_bypass` | категории маршрутизации |
 | `routing.direct.bittorrent` | `true` — незашифрованный BitTorrent идёт напрямую, `false` — по общим правилам (в прокси). Требует `sniffing` на инбаунде (включён в генерируемом конфиге) |
-| `geodata.dir`, `.geoip_url`, `.geosite_url` | откуда и куда качать geo-файлы |
+| `geodata.dir`, `.geoip_url`, `.geosite_url` | откуда и куда качать geo-файлы. По умолчанию — зеркало в Yandex Object Storage (`xpower/GEO/`), то же, что использует XPowerSpirit-OpenWRT: раздача из РФ без обращений к raw.githubusercontent |
 
 Значения по умолчанию для отсутствующих ключей оставлены в коде только ради совместимости с `settings.json` от старых версий.
 

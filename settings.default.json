@@ -105,8 +105,8 @@
   },
   "geodata": {
     "dir": "/usr/local/share/xray",
-    "geoip_url": "https://raw.githubusercontent.com/kirilllavrov/geoip-builder/release/geoip.dat",
-    "geosite_url": "https://raw.githubusercontent.com/kirilllavrov/geosite-builder/release/geosite.dat"
+    "geoip_url": "https://storage.yandexcloud.net/xpower/GEO/geoip.dat",
+    "geosite_url": "https://storage.yandexcloud.net/xpower/GEO/geosite.dat"
   },
   "routing": {
     "domain_strategy": "IPOnDemand",
