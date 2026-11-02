@@ -70,7 +70,8 @@
           "geosite:category-ru"
         ],
         "expectedIPs": [
-          "geoip:ru"
+          "geoip:ru",
+          "*"
         ],
         "skipFallback": true
       },
