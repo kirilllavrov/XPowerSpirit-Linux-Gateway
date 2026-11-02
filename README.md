@@ -154,7 +154,7 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | `dns.block_domains` | доменные паттерны, которые отвергаются на уровне DNS (по умолчанию `geosite:category-ads`). У старых `settings.json` без этого ключа источником остаётся `routing.block.domains` |
 | `dns.block_via_dns` | включить DNS-блокировку `dns.block_domains` (по умолчанию `true`) |
 | `dns.block_rcode` | код отказа для DNS-блокировки: `3` (по умолчанию) — NXDOMAIN, `0` — NOERROR с пустым ответом |
-| `dns.servers` | список DNS-серверов встроенного DNS Xray |
+| `dns.servers` | список DNS-серверов встроенного DNS Xray. У Yandex DoH в `domains` перечислены `domain:ru`, `domain:su`, `domain:xn--p1ai`, `domain:рф` и `geosite:category-ru`: российские домены целиком уходят к нему, `expectedIPs: geoip:ru` отсекает ответы с зарубежными адресами, `skipFallback` не даёт переключиться на зарубежный резолвер |
 | `balancer.expected`, `.max_rtt`, `.baselines`, `.fallback_tag` | основной пул `leastLoad` (по нагрузке) |
 | `balancer.streaming.enabled`, `.strategy` | отдельный пул `balancer-stream` для доменов из `routing.proxy.domains` (игры, стриминг): по умолчанию включён со стратегией `leastPing` — там решает задержка, а не загрузка узла |
 | `observatory.destination`, `.interval`, `.sampling`, `.timeout`, `.http_method` | `burstObservatory` |
@@ -181,8 +181,8 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 
 ```text
 Клиенты → dnsmasq :53 → Xray :15353 → dns-out (hijack) → dns-inbuilt (DoH)
-                                                       ├─ ru-домены → DoH Yandex
-                                                       └─ остальные → DoH Cloudflare / comss.one / ffmuc.net
+                                                       ├─ зоны .ru/.su/.рф и geosite:category-ru → DoH Yandex
+                                                       └─ остальные → DoH Cloudflare / unfiltered AdGuard / ffmuc.net
 
 Собственный DNS шлюза → 127.0.0.1:53 (тот же dnsmasq) → Xray
 ```
@@ -192,6 +192,8 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 Порт DNS-инбаунда Xray — `15353`, а не `5353`: `5353` зарегистрирован за mDNS, и его занимают сторонние сервисы (TorrServer/Bonjour, avahi, браузеры). Порт задаётся в `xray.dns_in_port`, установщик подставляет его же в `/etc/dnsmasq.conf`. DHCP не раздаётся — этим занимается основной роутер (Keenetic).
 
 Если Xray остановлен, dnsmasq отвечает через `dns.dnsmasq_fallback` (`77.88.8.8`) — клиенты не остаются без DNS.
+
+Формат `domains` у DNS-сервера — тот же, что у `domain` в правилах маршрутизации, поэтому здесь работают и префикс `domain:`, и категории `geosite:`. Без префикса домен считается полным (`full:`) — так задаются имена самих DoH-серверов в `dns.hosts`.
 
 Запросы к DoH-серверам идут через `https+local://` — режим DOHL, то есть **мимо** routing и прокси, напрямую. Имена DoH-серверов при этом должны разрешаться без обращения к внешнему DNS, поэтому их IP указаны в `dns.hosts`: на шлюзе системный резолвер сам ходит через Xray, и без этих записей получился бы цикл `Xray → DoH → DNS → Xray`.
 

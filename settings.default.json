@@ -63,6 +63,10 @@
       {
         "address": "https+local://common.dot.dns.yandex.net/dns-query",
         "domains": [
+          "domain:ru",
+          "domain:su",
+          "domain:xn--p1ai",
+          "domain:рф",
           "geosite:category-ru"
         ],
         "expectedIPs": [
