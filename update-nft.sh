@@ -218,9 +218,11 @@ verify_rules() {
 			echo "[X] Нет ip rule fwmark $TPROXY_MARK → table 100" >&2
 			return 1
 		}
-	ip route show table 100 2>/dev/null | grep -q "local 0.0.0.0/0" ||
+	# Ядро печатает `local default dev lo`, а не `local 0.0.0.0/0`
+	ip route show table 100 2>/dev/null |
+		grep -qE "local (default|0\.0\.0\.0/0) dev lo" ||
 		{
-			echo "[X] В таблице 100 нет local 0.0.0.0/0 dev lo" >&2
+			echo "[X] В таблице 100 нет local default dev lo" >&2
 			return 1
 		}
 
