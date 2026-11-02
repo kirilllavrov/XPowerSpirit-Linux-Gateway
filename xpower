@@ -375,12 +375,16 @@ if not bal:
     out = [o for o in cfg.get('outbounds', []) if o.get('protocol') not in ('freedom', 'blackhole', 'dns')]
     print('    (нет — прокси в конфиге: %d)' % len(out))
 else:
-    b = bal[0]
-    st = (b.get('strategy') or {})
-    ss = st.get('settings') or {}
-    print('    tag=%s, стратегия=%s, серверов=%d, expected=%s, maxRTT=%s, fallback=%s' % (
-        b.get('tag', '?'), st.get('type', '?'), len(b.get('selector') or []),
-        ss.get('expected', '?'), ss.get('maxRTT', '?'), b.get('fallbackTag', '—')))
+    for b in bal:
+        st = (b.get('strategy') or {})
+        ss = st.get('settings') or {}
+        if ss:
+            detail = 'expected=%s, maxRTT=%s' % (ss.get('expected', '?'), ss.get('maxRTT', '?'))
+        else:
+            detail = 'по задержке'
+        print('    tag=%s, стратегия=%s, серверов=%d, %s, fallback=%s' % (
+            b.get('tag', '?'), st.get('type', '?'), len(b.get('selector') or []),
+            detail, b.get('fallbackTag', '—')))
 " 2>/dev/null || echo "    (ошибка чтения конфига)"
 	else
 		echo "    (config.json не найден)"

@@ -154,7 +154,8 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | `dns.block_via_dns` | блокировать домены из `routing.block.domains` ещё и на уровне DNS (по умолчанию `true`) |
 | `dns.block_rcode` | код отказа для DNS-блокировки: `3` (по умолчанию) — NXDOMAIN, `0` — NOERROR с пустым ответом |
 | `dns.servers` | список DNS-серверов встроенного DNS Xray |
-| `balancer.expected`, `.max_rtt`, `.baselines`, `.fallback_tag` | стратегия `leastLoad` |
+| `balancer.expected`, `.max_rtt`, `.baselines`, `.fallback_tag` | основной пул `leastLoad` (по нагрузке) |
+| `balancer.streaming.enabled`, `.strategy` | отдельный пул `balancer-stream` для доменов из `routing.proxy.domains` (игры, стриминг): по умолчанию включён со стратегией `leastPing` — там решает задержка, а не загрузка узла |
 | `observatory.destination`, `.interval`, `.sampling`, `.timeout`, `.http_method` | `burstObservatory` |
 | `routing.domain_strategy` | `routing.domainStrategy` |
 | `routing.direct` / `.block` / `.proxy` / `.doh_bypass` | категории маршрутизации |
@@ -199,6 +200,7 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 - **burstObservatory** — пинг `connectivitycheck.gstatic.com/generate_204` (URL, интервал, число замеров — в `observatory`)
 - Сколько серверов использовать, отсечка по RTT и джиттеру — `balancer.expected`, `max_rtt`, `baselines`
 - При падении всех — переход на прямой трафик (`balancer.fallback_tag` → direct)
+- Игры и стриминг идут через второй пул `balancer-stream` с `leastPing`: он выбирает узел с наименьшей задержкой, тогда как основной `balancer` — с наименьшей загрузкой. Пул создаётся только при нескольких серверах и отключается ключом `balancer.streaming.enabled`
 - **Режим DIRECT**: если подписка истекла или в профиле не осталось рабочих серверов
   (например, исчерпан лимит устройств) — весь трафик идёт напрямую
 

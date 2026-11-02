@@ -33,6 +33,11 @@ STATE_DIR = os.path.join(CONFIG_DIR, "state")
 # Значения по умолчанию ниже нужны только для settings.json от старых версий,
 # где соответствующих ключей ещё нет.
 DEFAULT_TCP_KEEPALIVE_INTERVAL = 30
+
+# Теги балансировщиков. Основной пул — leastLoad (по нагрузке), отдельный для
+# игр и стриминга — leastPing (по задержке): в играх важна именно она.
+BALANCER_TAG = "balancer"
+STREAMING_TAG = "balancer-stream"
 DEFAULT_DNS_SERVERS = [
     {
         "address": "https+local://common.dot.dns.yandex.net/dns-query",
@@ -480,14 +485,16 @@ def build_rules(proxy_outbounds: list) -> list:
 
     if proxy_outbounds:
         use_balancer = len(proxy_outbounds) > 1
-        target = "balancer" if use_balancer else proxy_outbounds[0]["tag"]
+        target = BALANCER_TAG if use_balancer else proxy_outbounds[0]["tag"]
         route_key = "balancerTag" if use_balancer else "outboundTag"
 
-        # Стриминг и игры — через прокси
+        # Игры и стриминг — в отдельный пул с leastPing: там решает задержка,
+        # а не загрузка узла. Если пул не создаётся — туда же, куда всё остальное.
+        stream_target = STREAMING_TAG if streaming_enabled(proxy_outbounds) else target
         rules.append({
             "type": "field",
             "domain": proxy_domains,
-            route_key: target
+            route_key: stream_target
         })
 
         # Весь остальной трафик
@@ -506,32 +513,47 @@ def build_rules(proxy_outbounds: list) -> list:
     return rules
 
 
-def build_balancer(proxy_outbounds: list) -> dict:
+def build_balancer(proxy_outbounds: list, tag: str = BALANCER_TAG,
+                   strategy: str = None) -> dict:
     """
-    Создаёт конфигурацию балансировщика (leastLoad) по параметрам из settings.json:
+    Создаёт конфигурацию балансировщика по параметрам из settings.json:
       balancer.expected      — сколько лучших серверов использовать
       balancer.max_rtt       — отсечка по максимальному RTT
       balancer.baselines     — допустимое стандартное отклонение RTT (джиттер)
       balancer.fallback_tag  — outbound, если недоступны все
+      balancer.streaming     — отдельный пул для игр/стриминга (enabled, strategy)
+
+    strategy без settings — для leastPing: параметры стратегии (maxRTT/baselines)
+    относятся только к leastLoad, документированы они именно для него.
     """
     selector = [ob["tag"] for ob in proxy_outbounds]
-    # expected не может превышать число серверов
-    expected = setting("balancer.expected", 2)
-    settings_block = {
-        "expected": min(int(expected), len(proxy_outbounds)),
-        "maxRTT": setting("balancer.max_rtt", "800ms"),
-        "baselines": setting("balancer.baselines", ["200ms"]),
-    }
+    strategy_type = strategy or "leastLoad"
+    strategy_block = {"type": strategy_type}
+
+    if strategy_type == "leastLoad":
+        # expected не может превышать число серверов
+        expected = setting("balancer.expected", 2)
+        strategy_block["settings"] = {
+            "expected": min(int(expected), len(proxy_outbounds)),
+            "maxRTT": setting("balancer.max_rtt", "800ms"),
+            "baselines": setting("balancer.baselines", ["200ms"]),
+        }
 
     return {
-        "tag": "balancer",
+        "tag": tag,
         "selector": selector,
-        "strategy": {
-            "type": "leastLoad",
-            "settings": settings_block,
-        },
+        "strategy": strategy_block,
         "fallbackTag": setting("balancer.fallback_tag", "direct"),
     }
+
+
+def streaming_enabled(proxy_outbounds: list) -> bool:
+    """Отдельный пул имеет смысл только при нескольких серверах"""
+    return bool(setting("balancer.streaming.enabled", True)) and len(proxy_outbounds) > 1
+
+
+def streaming_strategy() -> str:
+    return setting("balancer.streaming.strategy", "leastPing")
 
 
 def build_burst_observatory(proxy_outbounds: list) -> dict:
@@ -607,13 +629,20 @@ def assemble_config(proxy_outbounds: list, output_path: str):
     }
 
     if len(proxy_outbounds) > 1:
-        routing["balancers"] = [build_balancer(proxy_outbounds)]
+        balancers = [build_balancer(proxy_outbounds)]
+        if streaming_enabled(proxy_outbounds):
+            balancers.append(build_balancer(proxy_outbounds, tag=STREAMING_TAG,
+                                            strategy=streaming_strategy()))
+        routing["balancers"] = balancers
 
     cfg["routing"] = routing
 
     print(f"  ✓ Сгенерировано {len(proxy_outbounds)} прокси", file=sys.stderr)
     if len(proxy_outbounds) > 1:
         print(f"  ✓ Балансировщик: {len(proxy_outbounds)} серверов (leastLoad)", file=sys.stderr)
+        if streaming_enabled(proxy_outbounds):
+            print(f"  ✓ Игры и стриминг: отдельный пул ({streaming_strategy()})",
+                  file=sys.stderr)
 
     write_config(cfg, output_path)
     print(f"  ✓ Конфиг сохранён: {output_path}", file=sys.stderr)

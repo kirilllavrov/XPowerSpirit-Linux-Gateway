@@ -94,6 +94,10 @@
     "baselines": [
       "200ms"
     ],
+    "streaming": {
+      "enabled": true,
+      "strategy": "leastPing"
+    },
     "fallback_tag": "direct"
   },
   "observatory": {
