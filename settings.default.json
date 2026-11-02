@@ -50,15 +50,13 @@
         "1.0.0.1",
         "1.1.1.1"
       ],
-      "dns.comss.one": [
-        "185.146.157.78",
-        "195.133.25.16",
-        "212.109.195.93",
-        "212.109.221.20"
-      ],
       "doh.ffmuc.net": [
         "5.1.66.255",
         "185.150.99.255"
+      ],
+      "unfiltered.adguard-dns.com": [
+        "94.140.14.140",
+        "94.140.14.141"
       ]
     },
     "servers": [
@@ -77,7 +75,7 @@
         "skipFallback": false
       },
       {
-        "address": "https+local://dns.comss.one/dns-query",
+        "address": "https+local://unfiltered.adguard-dns.com/dns-query",
         "skipFallback": false
       },
       {
@@ -86,7 +84,10 @@
       }
     ],
     "block_via_dns": true,
-    "block_rcode": 3
+    "block_rcode": 3,
+    "block_domains": [
+      "geosite:category-ads"
+    ]
   },
   "balancer": {
     "expected": 2,
@@ -129,9 +130,7 @@
       "bittorrent": true
     },
     "block": {
-      "domains": [
-        "geosite:category-ads"
-      ]
+      "domains": []
     },
     "proxy": {
       "domains": [
@@ -146,7 +145,7 @@
       "dns.google",
       "dns.quad9.net",
       "doh.opendns.com",
-      "dns.comss.one",
+      "unfiltered.adguard-dns.com",
       "doh.ffmuc.net"
     ]
   }

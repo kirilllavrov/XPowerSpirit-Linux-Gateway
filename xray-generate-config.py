@@ -225,12 +225,17 @@ def base_config() -> dict:
     # ответ отвергает запрос с rcode N («如果「域名」是井号后加数字的形式…»).
     # hosts проверяется ДО серверов, поэтому заблокированный домен не тратит
     # запрос к резолверу и не получает адрес — соединение не начинается.
+    #
+    # Источник — dns.block_domains. У settings.json прошлых версий такого ключа
+    # нет, там блокировка бралась из routing.block.domains: читаем его как запасной.
     if setting("dns.block_via_dns", True):
         rcode = setting("dns.block_rcode", 3)
-        block_list = load_routing().get("block", {}).get("domains", [])
+        block_list = setting("dns.block_domains", None)
+        if block_list is None:
+            block_list = load_routing().get("block", {}).get("domains", [])
         for pattern in block_list:
             if pattern in dns_hosts:
-                print(f"  [X] {pattern} есть и в dns.hosts, и в routing.block.domains:",
+                print(f"  [X] {pattern} есть и в dns.hosts, и в dns.block_domains:",
                       file=sys.stderr)
                 print("      одно значение не может быть и адресом, и отказом",
                       file=sys.stderr)
@@ -344,46 +349,53 @@ def build_direct_config() -> dict:
     direct_ips = rt.get("direct", {}).get("ips", [])
     direct_domains = rt.get("direct", {}).get("domains", [])
 
+    # Пустой block.domains — норма: блокировка целиком лежит на DNS
+    # (dns.block_domains). Правило без единого условия не создаём.
+    rules = [
+        {
+            "type": "field",
+            "inboundTag": ["dns-in"],
+            "outboundTag": "dns-out"
+        },
+        {
+            "type": "field",
+            "inboundTag": ["tproxy-in"],
+            "port": "53",
+            "outboundTag": "dns-out"
+        },
+        {
+            "type": "field",
+            "domain": doh,
+            "outboundTag": "direct"
+        },
+    ]
+    if block_domains:
+        rules.append({
+            "type": "field",
+            "domain": block_domains,
+            "outboundTag": "block"
+        })
+    rules.extend([
+        {
+            "type": "field",
+            "ip": direct_ips,
+            "outboundTag": "direct"
+        },
+        {
+            "type": "field",
+            "domain": direct_domains,
+            "outboundTag": "direct"
+        },
+        {
+            "type": "field",
+            "network": "tcp,udp",
+            "outboundTag": "direct"
+        }
+    ])
+
     cfg["routing"] = {
         "domainStrategy": setting("routing.domain_strategy", "IPOnDemand"),
-        "rules": [
-            {
-                "type": "field",
-                "inboundTag": ["dns-in"],
-                "outboundTag": "dns-out"
-            },
-            {
-                "type": "field",
-                "inboundTag": ["tproxy-in"],
-                "port": "53",
-                "outboundTag": "dns-out"
-            },
-            {
-                "type": "field",
-                "domain": doh,
-                "outboundTag": "direct"
-            },
-            {
-                "type": "field",
-                "domain": block_domains,
-                "outboundTag": "block"
-            },
-            {
-                "type": "field",
-                "ip": direct_ips,
-                "outboundTag": "direct"
-            },
-            {
-                "type": "field",
-                "domain": direct_domains,
-                "outboundTag": "direct"
-            },
-            {
-                "type": "field",
-                "network": "tcp,udp",
-                "outboundTag": "direct"
-            }
-        ]
+        "rules": rules
     }
     return cfg
 
@@ -438,12 +450,19 @@ def build_rules(proxy_outbounds: list) -> list:
             "domain": doh,
             "outboundTag": "direct"
         },
-        # Блокировка рекламы
-        {
+    ]
+
+    # Блокировка рекламы. Пустой block.domains — норма: блокировка целиком
+    # лежит на DNS (dns.block_domains), а правило без единого условия
+    # не создаётся — иначе оно перехватило бы весь трафик.
+    if block_domains:
+        rules.append({
             "type": "field",
             "domain": block_domains,
             "outboundTag": "block"
-        },
+        })
+
+    rules += [
         # NTP (порт 123) — напрямую
         {
             "type": "field",
