@@ -449,6 +449,16 @@ do_test() {
 		echo -e "${RED}○ не слушает${NC}"
 	fi
 
+	echo -n "  DNS-блокировка:    "
+	local nblocked
+	nblocked=$(jq -r '[.dns.hosts // {} | .[] | select(type == "string" and startswith("#"))] | length' \
+		"$CONFIG_JSON" 2>/dev/null || echo 0)
+	if [ "${nblocked:-0}" -gt 0 ]; then
+		echo -e "${GREEN}● включена (${nblocked} правил с отказом)${NC}"
+	else
+		echo -e "${YELLOW}○ выключена (dns.block_via_dns=false)${NC}"
+	fi
+
 	echo -n "  Выход в интернет:  "
 	local status
 	status=$(curl -s --max-time 8 -o /dev/null -w '%{http_code}' \

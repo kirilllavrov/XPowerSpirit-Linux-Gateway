@@ -63,16 +63,76 @@ if [ -z "${DNS_IPS// /}" ]; then
 fi
 
 # ============================================
-#   АВТООПРЕДЕЛЕНИЕ LAN
+#   ОПРЕДЕЛЕНИЕ LAN-ИНТЕРФЕЙСА
 # ============================================
-LAN_IF=$(ip -o -4 addr show 2>/dev/null | \
-	awk '{print $2}' | \
-	grep -vE '^(lo|docker|virbr|wg|tun|veth|br-)' | \
-	head -1)
+# Порядок:
+#   1. network.interface из settings.json — если задан и интерфейс существует;
+#   2. автоопределение с ИСКЛЮЧЕНИЕМ интерфейса аплинка (тот, через который идёт
+#      default route).
+# Раньше брался просто первый попавшийся интерфейс, и на машине с двумя NIC
+# (eth0 = аплинк, eth1 = LAN) TProxy вешался на аплинк: клиентский трафик не
+# проксировался, а правила применялись к входящему из интернета.
+
+iface_has_ipv4() {
+	[ -n "$1" ] && ip -4 addr show "$1" 2>/dev/null | grep -q 'inet '
+}
+
+WAN_IF=$(ip route show default 2>/dev/null |
+	awk '{for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit }}')
+
+LAN_IF_CFG=""
+SINGLE_NIC=0
+[ -f "$SETTINGS_JSON" ] && LAN_IF_CFG=$(settings_get '.network.interface')
+
+if [ -n "$LAN_IF_CFG" ]; then
+	if iface_has_ipv4 "$LAN_IF_CFG"; then
+		LAN_IF="$LAN_IF_CFG"
+		echo "→ LAN интерфейс: $LAN_IF (из settings.json → network.interface)"
+	else
+		echo "[!] network.interface=\"$LAN_IF_CFG\" не найден — определяю автоматически" >&2
+		LAN_IF=""
+	fi
+fi
+
+if [ -z "$LAN_IF" ]; then
+	# Кандидаты: все с IPv4, кроме виртуальных и кроме интерфейса аплинка
+	# `|| true` обязателен: под set -e пустой результат grep (нет совпадений)
+	# завершает скрипт молча — так и было на шлюзе с одним интерфейсом
+	ALL_IFS=$(ip -o -4 addr show 2>/dev/null |
+		awk '{print $2}' |
+		grep -vE '^(lo|docker|virbr|wg|tun|veth|br-)' || true)
+	CANDIDATES=$(printf '%s\n' "$ALL_IFS" | grep -vx "${WAN_IF:-__none__}" || true)
+
+	# Шлюз с одним интерфейсом (основной сценарий: устройство за главным
+	# роутером) — аплинк и LAN совпадают, исключать аплинк не из чего
+	if [ -z "$CANDIDATES" ] && [ -n "$WAN_IF" ]; then
+		CANDIDATES="$WAN_IF"
+		SINGLE_NIC=1
+	fi
+
+	LAN_IF=$(printf '%s\n' "$CANDIDATES" | grep . | head -1 || true)
+	ALL=$(printf '%s\n' "$ALL_IFS" | tr '\n' ' ')
+	COUNT=$(printf '%s\n' "$CANDIDATES" | grep -c . || true)
+
+	if [ -n "$LAN_IF" ] && [ "$SINGLE_NIC" != "1" ]; then
+		echo "→ LAN интерфейс: $LAN_IF (автоопределение, аплинк ${WAN_IF:-не найден} исключён)"
+		if [ "$COUNT" -gt 1 ]; then
+			echo "  [!] Подходят несколько интерфейсов: $ALL — выбран $LAN_IF" >&2
+			echo "      Задайте нужный: settings.json → network.interface" >&2
+		fi
+	fi
+fi
 
 if [ -z "$LAN_IF" ]; then
 	echo "[X] Не удалось определить LAN интерфейс" >&2
+	echo "    Доступные интерфейсы: $(ip -o -4 addr show 2>/dev/null | awk '{print $2}' | tr '\n' ' ')" >&2
+	echo "    Аплинк (default route): ${WAN_IF:-не найден}" >&2
+	echo "    Задайте вручную: settings.json → network.interface" >&2
 	exit 1
+fi
+
+if [ -n "$WAN_IF" ] && [ "$LAN_IF" = "$WAN_IF" ]; then
+	echo "[!] LAN и аплинк совпали ($LAN_IF) — похоже, шлюз с одним интерфейсом" >&2
 fi
 
 # Получаем IP шлюза на LAN интерфейсе (нужен для точечного bypass)
@@ -101,10 +161,80 @@ cleanup_rules() {
 	echo "✓ Правила очищены"
 }
 
+# Снятие всего, что успели применить, при ошибке на середине.
+# Скрипт работает под `set -e` и без отката оставлял полупостроенную таблицу:
+# часть правил есть, часть нет — трафик уходил мимо прокси, а `nftables правила
+# применены` так и не печаталось, и понять это было нечем.
+ROLLBACK_NEEDED=0
+
+rollback_rules() {
+	[ "$ROLLBACK_NEEDED" = "1" ] || return 0
+	ROLLBACK_NEEDED=0
+	echo "[X] Применение правил прервано — откат" >&2
+	cleanup_rules >&2 || true
+	echo "[X] Правила сняты полностью, трафик идёт напрямую" >&2
+}
+
+# ============================================
+#   ПРОВЕРКА ПРИМЕНЁННЫХ ПРАВИЛ
+# ============================================
+# Читаем таблицу обратно: `nft add rule` может отработать без ошибки, но
+# правило не встанет на место (например, при конфликте с уже существующим).
+verify_rules() {
+	local dump missing=""
+	dump=$(nft list table "$TABLE_NAME" 2>/dev/null) || {
+		echo "[X] Таблица $TABLE_NAME не читается после применения" >&2
+		return 1
+	}
+
+	printf '%s\n' "$dump" | grep -qF "tproxy ip to 127.0.0.1:$TPROXY_PORT" ||
+		missing="$missing tproxy-правило"
+
+	printf '%s\n' "$dump" | grep -q "type filter hook prerouting priority mangle" ||
+		missing="$missing хук-prerouting"
+
+	printf '%s\n' "$dump" | grep -q "type route hook output priority mangle" ||
+		missing="$missing хук-output"
+
+	printf '%s\n' "$dump" | grep -qE "meta mark (0x0*$(printf '%x' "$BYPASS_MARK")|$BYPASS_MARK)([[:space:]]|$)" ||
+		missing="$missing bypass-метка-$BYPASS_MARK"
+
+	printf '%s\n' "$dump" | grep -qF "udp dport 443 drop" ||
+		missing="$missing блокировка-quic"
+
+	# nft печатает имя интерфейса в кавычках, но старые версии — без
+	printf '%s\n' "$dump" | grep -qE "iifname \"?$LAN_IF\"?([[:space:]]|$)" ||
+		missing="$missing правила-для-$LAN_IF"
+
+	if [ -n "$missing" ]; then
+		echo "[X] После применения не найдено:$missing" >&2
+		return 1
+	fi
+
+	# Policy routing: без него трафик шлюза после mark уйдёт не в lo
+	ip rule show 2>/dev/null |
+		grep -qE "fwmark 0x0*$(printf '%x' "$TPROXY_MARK")[[:space:]]+lookup (100|xray)" ||
+		{
+			echo "[X] Нет ip rule fwmark $TPROXY_MARK → table 100" >&2
+			return 1
+		}
+	ip route show table 100 2>/dev/null | grep -q "local 0.0.0.0/0" ||
+		{
+			echo "[X] В таблице 100 нет local 0.0.0.0/0 dev lo" >&2
+			return 1
+		}
+
+	return 0
+}
+
 # ============================================
 #   ПРИМЕНЕНИЕ ПРАВИЛ
 # ============================================
 setup_network() {
+	# Всё, что ниже, меняет состояние системы: при ошибке на середине
+	# откатываем, иначе останутся policy routing без правил или полутаблица.
+	ROLLBACK_NEEDED=1
+
 	echo "→ Настройка policy routing..."
 
 	# Очищаем предыдущие правила
@@ -115,9 +245,12 @@ setup_network() {
 	ip rule add fwmark "$TPROXY_MARK" table 100
 	ip route add local 0.0.0.0/0 dev lo table 100
 
-	# Включаем route_localnet для IPv4 (нужно для TProxy на lo)
-	sysctl -w net.ipv4.conf.all.route_localnet=1 2>/dev/null
-	sysctl -w net.ipv4.conf.lo.route_localnet=1 2>/dev/null
+	# Включаем route_localnet для IPv4 (нужно для TProxy на lo).
+	# `|| true` обязателен: в контейнерах и на read-only /proc/sys sysctl
+	# возвращает ошибку, а под `set -e` это обрывало скрипт уже после того,
+	# как policy routing был изменён.
+	sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null 2>&1 || true
+	sysctl -w net.ipv4.conf.lo.route_localnet=1 >/dev/null 2>&1 || true
 
 	echo "→ Настройка nftables..."
 
@@ -242,7 +375,14 @@ setup_network() {
 	#     Чтобы отключить проксирование шлюза — закомментируйте строку ниже.
 	nft add rule "$TABLE_NAME" xray_output meta mark set "$TPROXY_MARK" accept
 
-	echo "✓ nftables правила применены (таблица $TABLE_NAME)"
+	# Читаем обратно: правило могло не встать, и молча
+	if ! verify_rules; then
+		rollback_rules
+		exit 1
+	fi
+
+	ROLLBACK_NEEDED=0
+	echo "✓ nftables правила применены и проверены (таблица $TABLE_NAME)"
 }
 
 # ============================================
@@ -251,5 +391,7 @@ setup_network() {
 if [ "$1" = "--cleanup" ]; then
 	cleanup_rules
 else
+	trap 'rollback_rules' EXIT
 	setup_network
+	trap - EXIT
 fi

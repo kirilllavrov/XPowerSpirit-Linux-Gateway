@@ -152,6 +152,44 @@ def normalize_outbound(ob: dict) -> dict:
     return ob
 
 
+# Схемы DNS-сервера, которые резолвят свой домен сами (local-режимы) —
+# по документации они не проходят через routing, а разрешаются системой.
+LOCAL_DNS_SCHEMES = ("https+local://", "tcp+local://", "quic+local://")
+
+
+def check_doh_pinned(servers: list, hosts: dict) -> None:
+    """
+    DoH/DoT-сервер, заданный доменом без IP в dns.hosts, даёт петлю резолвинга:
+    local-режим разрешает домен через систему (dnsmasq → Xray :53 → тот же DoH).
+    Документация прямо советует держать IP таких серверов в hosts
+    («注意可能的回环问题, hosts 可能有帮助»).
+    """
+    unpinned = []
+    for server in servers:
+        address = server.get("address") if isinstance(server, dict) else server
+        if not isinstance(address, str):
+            continue
+        scheme = next((s for s in LOCAL_DNS_SCHEMES if address.startswith(s)), None)
+        if not scheme:
+            continue
+        host = address[len(scheme):].split("/")[0].split(":")[0]
+        if "." not in host:          # IP-литерал — резолвить нечего
+            continue
+        if host not in hosts:
+            unpinned.append(host)
+
+    if unpinned:
+        for host in unpinned:
+            print(f"  [X] {SETTINGS_PATH} → dns.servers: {host} не закреплён в dns.hosts",
+                  file=sys.stderr)
+        print("  [X] local-режим (https+local://) резолвит домен через систему:",
+              file=sys.stderr)
+        print("      dnsmasq → Xray :53 → тот же DoH = петля резолвинга.", file=sys.stderr)
+        print("      Добавьте IP сервера в dns.hosts (ключ = домен, значение = массив IP).",
+              file=sys.stderr)
+        sys.exit(1)
+
+
 # ============================================
 #   БАЗОВАЯ КОНФИГУРАЦИЯ
 # ============================================
@@ -175,6 +213,24 @@ def base_config() -> dict:
         log_error("  [!] settings.json: dns.hosts должен быть объектом — "
                   "использую значения по умолчанию")
         dns_hosts = DEFAULT_DNS_HOSTS
+
+    check_doh_pinned(dns_servers, dns_hosts)
+
+    # Блокировка на уровне DNS: в hosts пишется "#N" — по документации такой
+    # ответ отвергает запрос с rcode N («如果「域名」是井号后加数字的形式…»).
+    # hosts проверяется ДО серверов, поэтому заблокированный домен не тратит
+    # запрос к резолверу и не получает адрес — соединение не начинается.
+    if setting("dns.block_via_dns", True):
+        rcode = setting("dns.block_rcode", 3)
+        block_list = load_routing().get("block", {}).get("domains", [])
+        for pattern in block_list:
+            if pattern in dns_hosts:
+                print(f"  [X] {pattern} есть и в dns.hosts, и в routing.block.domains:",
+                      file=sys.stderr)
+                print("      одно значение не может быть и адресом, и отказом",
+                      file=sys.stderr)
+                sys.exit(1)
+            dns_hosts[pattern] = f"#{rcode}"
 
     base = {
         "log": {

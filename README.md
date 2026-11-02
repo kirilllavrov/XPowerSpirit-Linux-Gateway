@@ -138,7 +138,8 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | --- | --- |
 | `subscription.url`, `.user_agent`, `.remarks` | подписка, User-Agent и выбранный профиль |
 | `hwid`, `device_model`, `device_os`, `ver_os` | заголовки запроса подписки: `x-hwid`, `X-Device-Model`, `X-Device-Os`, `X-Ver-Os` (уходят и при установке, и при каждом обновлении; пустые значения не отправляются) |
-| `network.interface`, `.ip`, `.mask`, `.gateway` | сетевые параметры шлюза (заполняет установщик) |
+| `network.interface` | LAN-интерфейс: приоритетнее автоопределения. Если пуст или такого интерфейса нет — берётся первый с IPv4, **кроме** интерфейса default route (аплинка). На машине с двумя NIC задавайте явно |
+| `network.ip`, `.mask`, `.gateway` | сетевые параметры шлюза (заполняет установщик) |
 | `xray.gid` | GID группы `xray` (bypass в nftables) |
 | `xray.tproxy_port` | порт TProxy-инбаунда (`tunnel`) |
 | `xray.dns_in_port` | порт DNS-инбаунда, куда форвардит dnsmasq |
@@ -149,7 +150,9 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | `api.enabled`, `api.listen_port` | gRPC API для статистики (`stats`, `api`, `policy` в конфиге) |
 | `dns.query_strategy`, `.serve_expired_ttl`, `.dnsmasq_fallback` | параметры DNS |
 | `dns.disable_cache`, `.serve_stale`, `.disable_fallback`, `.disable_fallback_if_match`, `.enable_parallel_query` | флаги DNS Xray |
-| `dns.hosts` | статические IP DoH-серверов (они же bypass-адреса в nftables) |
+| `dns.hosts` | статические IP DoH-серверов (они же bypass-адреса в nftables). DoH-сервер, заданный доменом без IP здесь, отвергается генератором: `https+local://` резолвит домен через систему и получается петля |
+| `dns.block_via_dns` | блокировать домены из `routing.block.domains` ещё и на уровне DNS (по умолчанию `true`) |
+| `dns.block_rcode` | код отказа для DNS-блокировки: `3` (по умолчанию) — NXDOMAIN, `0` — NOERROR с пустым ответом |
 | `dns.servers` | список DNS-серверов встроенного DNS Xray |
 | `balancer.expected`, `.max_rtt`, `.baselines`, `.fallback_tag` | стратегия `leastLoad` |
 | `observatory.destination`, `.interval`, `.sampling`, `.timeout`, `.http_method` | `burstObservatory` |
@@ -165,6 +168,8 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 ### Обработка трафика
 
 Клиенты отправляют весь трафик на Xray-шлюз (прописано в DHCP основного роутера). nftables перехватывает трафик в цепочке PREROUTING и направляет в Xray через TProxy. Xray маршрутизирует: российские сайты — напрямую, зарубежные — через прокси, реклама — в блокировку.
+
+Реклама блокируется в два слоя. Первый — `routing.block.domains` → `blackhole`: имя резолвится, а соединение рвётся. Второй — `dns.block_via_dns`: те же домены попадают в `dns.hosts` со значением `#3`, и тогда DNS-ответ приходит пустым с NXDOMAIN. Второй слой важнее по эффекту: `hosts` проверяется **до** резолверов, поэтому заблокированный домен не тратит запрос к DoH, а клиент получает отказ за миллисекунды вместо TLS-таймаута. Отключается ключом `dns.block_via_dns: false`, код отказа меняется через `dns.block_rcode` (`3` — NXDOMAIN, `0` — NOERROR с пустым ответом).
 
 Незашифрованный BitTorrent распознаётся через `sniffing` и уходит напрямую (`routing.direct.bittorrent`). Это осознанный компромисс: BT не нагружает прокси, но пиры и DHT видят реальный IP шлюза. Для зашифрованного/обфусцированного BT (MSE, uTP) распознавание не работает — такой трафик идёт по общим правилам, то есть через прокси.
 
@@ -290,9 +295,17 @@ Cron (2:30) / systemd network hook
         ├─► geoip.dat + geosite.dat (SHA-верификация)
         ├─► Подписка → парсер → генератор → config.json
         ├─► xray run -test (валидация)
-        ├─► update-nft.sh (nftables)
+        ├─► update-nft.sh (nftables): при сбое правила снимаются целиком,
+        │   а update-xray.sh завершается с кодом 1 — проксирование не работает
         └─► Перезапуск Xray (systemctl)
 ```
+
+`xray-network-update.service` запускается после загрузки, ждёт реальный выход
+в интернет (`wait-online.sh`, до 5 минут) и выполняет то же обновление.
+Триггер по смене состояния сети (`xray-network-update.path`) ставится только
+там, где есть `ifupdown`: файл `/run/network/ifstate`, за которым он следит,
+создаёт только он. На Ubuntu с netplan/NetworkManager юнита не будет — вместо
+молча не работающего хука установщик об этом скажет.
 
 ## Ручное обновление
 
@@ -313,6 +326,7 @@ sudo /usr/local/share/xray/update-xray.sh
 ├── xray-sub-parser.py
 ├── update-xray.sh
 ├── update-nft.sh
+├── wait-online.sh                      # ждёт интернет перед обновлением
 ├── geoip.dat
 └── geosite.dat
 /etc/xray/
@@ -325,14 +339,14 @@ sudo /usr/local/share/xray/update-xray.sh
     └── geosite.dat.sha256sum
 /etc/systemd/system/
 ├── xray.service
-├── xray-network-update.service
-└── xray-network-update.path
+├── xray-network-update.service     # после загрузки: ждёт интернет и обновляет
+└── xray-network-update.path        # только если установлен ifupdown
 /etc/dnsmasq.conf                       # DNS-фронтенд на :53 → Xray dns-in
 /etc/crontab (crontab -l)               # ежедневное обновление в 2:30
 /var/log/
-├── xray-access.log
-├── xray-error.log
-└── xray-update.log
+├── xray-access.log                 # при log.loglevel=none (по умолчанию) не ведётся
+├── xray-error.log                  # то же: loglevel=none отключает и его
+└── xray-update.log                 # журнал самого update-xray.sh — ведётся всегда
 ```
 
 ## Диагностика

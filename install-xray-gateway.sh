@@ -1036,26 +1036,51 @@ systemctl restart cron 2>/dev/null || systemctl restart cronie 2>/dev/null || tr
 # ============================================
 echo "=== Шаг 13: Network hook ==="
 
-# Создаём systemd unit, запускаемый при поднятии сети
+# Ждём не «сеть поднята», а реальный выход в интернет: network-online.target
+# на разных системах означает разное, а обновлению нужен доступ к подписке.
+cat >/usr/local/share/xray/wait-online.sh <<'WAITEOF'
+#!/bin/sh
+# Ждёт, пока появится default route и пройдёт HTTPS-запрос.
+# Вместо `sleep 120`: на медленном линке двух минут не хватает, а на быстром
+# это лишняя задержка перед первым обновлением.
+LIMIT="${1:-300}"
+i=0
+while [ "$i" -lt "$LIMIT" ]; do
+	ip route show default 2>/dev/null | grep -q default &&
+		curl -fsS -m 5 -o /dev/null https://storage.yandexcloud.net/ 2>/dev/null &&
+		exit 0
+	i=$((i + 5))
+	sleep 5
+done
+echo "wait-online: интернет не появился за ${LIMIT}s" >&2
+exit 1
+WAITEOF
+chmod 755 /usr/local/share/xray/wait-online.sh
+
 cat >/etc/systemd/system/xray-network-update.service <<'NETSVC'
 [Unit]
-Description=Xray auto-update on network up
+Description=Xray auto-update after network is up
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'sleep 120 && /usr/local/share/xray/update-xray.sh'
+# Ждём реальный выход в интернет (до 5 минут), затем обновляем подписку
+ExecStart=/bin/sh -c '/usr/local/share/xray/wait-online.sh 300 && /usr/local/share/xray/update-xray.sh'
 RemainAfterExit=no
 
 [Install]
 WantedBy=multi-user.target
 NETSVC
 
-cat >/etc/systemd/system/xray-network-update.path <<'NETPATH'
+# Отдельный триггер на смену состояния сети — только для систем с ifupdown:
+# /run/network/ifstate создаёт исключительно он. На Ubuntu 24.04 (netplan +
+# systemd-networkd), как и на любом NetworkManager, файла нет и юнит молча
+# не срабатывает никогда, поэтому там он не устанавливается вовсе.
+if [ -e /run/network/ifstate ] || command -v ifup >/dev/null 2>&1; then
+	cat >/etc/systemd/system/xray-network-update.path <<'NETPATH'
 [Unit]
-Description=Watch for network state changes
-After=network.target
+Description=Watch for network state changes (ifupdown)
 
 [Path]
 PathChanged=/run/network/ifstate
@@ -1063,11 +1088,19 @@ PathChanged=/run/network/ifstate
 [Install]
 WantedBy=multi-user.target
 NETPATH
+	systemctl enable xray-network-update.path 2>/dev/null || true
+	echo "[+] Network hook: обновление после ifup (ifupdown найден)"
+else
+	rm -f /etc/systemd/system/xray-network-update.path
+	echo "[!] ifupdown не найден (/run/network/ifstate отсутствует) — триггер по смене"
+	echo "    состояния сети не устанавливается; обновление выполняется при загрузке"
+	echo "    (xray-network-update.service) и по cron"
+fi
 
 # Включаем
 systemctl daemon-reload
-systemctl enable xray-network-update.path 2>/dev/null || true
-echo "[+] Network hook: автообновление при поднятии сети"
+systemctl enable xray-network-update.service 2>/dev/null || true
+echo "[+] Network hook: автообновление после появления интернета (с проверкой связи)"
 
 # ============================================
 #   14. Запуск служб

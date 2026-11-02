@@ -84,7 +84,9 @@
         "address": "https+local://doh.ffmuc.net/dns-query",
         "skipFallback": false
       }
-    ]
+    ],
+    "block_via_dns": true,
+    "block_rcode": 3
   },
   "balancer": {
     "expected": 2,
