@@ -375,6 +375,14 @@ def build_direct_config() -> dict:
             "domain": block_domains,
             "outboundTag": "block"
         })
+    # QUIC блокируется и в DIRECT-режиме: ключ один на все режимы
+    if rt.get("block_quic", False):
+        rules.append({
+            "type": "field",
+            "port": "443",
+            "network": "udp",
+            "outboundTag": "block"
+        })
     rules.extend([
         {
             "type": "field",
@@ -428,6 +436,7 @@ def build_rules(proxy_outbounds: list) -> list:
     direct_ips = rt.get("direct", {}).get("ips", [])
     direct_domains = rt.get("direct", {}).get("domains", [])
     direct_bittorrent = rt.get("direct", {}).get("bittorrent", True)
+    block_quic = rt.get("block_quic", False)
     proxy_domains = rt.get("proxy", {}).get("domains", [])
 
     rules = [
@@ -470,13 +479,19 @@ def build_rules(proxy_outbounds: list) -> list:
             "network": "udp",
             "outboundTag": "direct"
         },
-        # QUIC (UDP/443) — блокируем на уровне Xray
-        {
+    ]
+
+    # QUIC (UDP/443). По умолчанию не блокируется: HTTP/3 проходит через прокси.
+    # Тот же ключ routing.block_quic управляет drop-правилом в nftables
+    if block_quic:
+        rules.append({
             "type": "field",
             "port": "443",
             "network": "udp",
             "outboundTag": "block"
-        },
+        })
+
+    rules += [
         # Локальные и российские IP — напрямую
         {
             "type": "field",

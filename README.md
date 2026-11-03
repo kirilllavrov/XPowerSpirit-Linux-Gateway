@@ -160,6 +160,7 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | `observatory.destination`, `.interval`, `.sampling`, `.timeout`, `.http_method` | `burstObservatory` |
 | `routing.domain_strategy` | `routing.domainStrategy` |
 | `routing.direct` / `.block` / `.proxy` / `.doh_bypass` | категории маршрутизации |
+| `routing.block_quic` | блокировать QUIC (UDP/443) в двух слоях — правило Xray и `drop` в nftables. По умолчанию `false`: HTTP/3 проксируется |
 | `routing.direct.bittorrent` | `true` — незашифрованный BitTorrent идёт напрямую, `false` — по общим правилам (в прокси). Требует `sniffing` на инбаунде (включён в генерируемом конфиге) |
 | `geodata.dir`, `.geoip_url`, `.geosite_url` | откуда и куда качать geo-файлы. По умолчанию — зеркало в Yandex Object Storage (`xpower/GEO/`), то же, что использует XPowerSpirit-OpenWRT: раздача из РФ без обращений к raw.githubusercontent |
 
@@ -236,9 +237,16 @@ Quad9 работает по **DNS over QUIC** (`quic+local://dns.quad9.net`, р�
 grep 'Доступные профили' /var/log/xray-update.log
 ```
 
-### Блокировка QUIC
+### QUIC
 
-QUIC (UDP/443) блокируется чтобы браузеры использовали TCP/HTTPS (VLESS+XTLS не поддерживает UDP).
+QUIC (UDP/443) по умолчанию **не блокируется**: HTTP/3 проходит через прокси. Проверено на боевом шлюзе —
+`cloudflare-quic.com` отвечает по HTTP/3 (`ver=3`), а `cloudflare.com/cdn-cgi/trace` показывает IP прокси-узла
+из подписки, а не адрес провайдера.
+
+Блокировка включается ключом `routing.block_quic: true` и действует сразу в двух слоях: правило
+`port 443 / udp → block` в Xray и `udp dport 443 drop` в nftables (до TProxy). Раньше обе были зашиты в код
+безусловно. Отдельный случай — `quic+local://` резолверы: DOQL идёт мимо routing и его IP исключены из TProxy
+через `dns.hosts`, поэтому блокировка QUIC на них не влияет.
 
 ## CLI: `xpower`
 

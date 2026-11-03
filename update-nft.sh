@@ -21,6 +21,9 @@ XRAY_GID=990
 TPROXY_PORT=12345
 TPROXY_MARK=1
 BYPASS_MARK=2
+# Блокировка QUIC (UDP/443): по умолчанию выключена — HTTP/3 проксируется.
+# Переопределяется ключом routing.block_quic в settings.json
+BLOCK_QUIC=false
 TABLE_NAME="inet xray"
 SETTINGS_JSON="/etc/xray/settings.json"
 
@@ -52,6 +55,10 @@ if [ -f "$SETTINGS_JSON" ]; then
 
 	_bmark=$(settings_get '.xray.bypass_mark')
 	[ -n "$_bmark" ] && BYPASS_MARK="$_bmark"
+
+	# QUIC (UDP/443). По умолчанию не блокируется: HTTP/3 проходит через прокси
+	_block_quic=$(settings_get '.routing.block_quic')
+	[ -n "$_block_quic" ] && BLOCK_QUIC="$_block_quic"
 fi
 
 # IP DoH-серверов — из settings.json (dns.hosts), чтобы не дублировать их в коде
@@ -199,8 +206,13 @@ verify_rules() {
 	printf '%s\n' "$dump" | grep -qE "meta mark (0x0*$(printf '%x' "$BYPASS_MARK")|$BYPASS_MARK)([[:space:]]|$)" ||
 		missing="$missing bypass-метка-$BYPASS_MARK"
 
-	printf '%s\n' "$dump" | grep -qF "udp dport 443 drop" ||
-		missing="$missing блокировка-quic"
+	if [ "$BLOCK_QUIC" = "true" ]; then
+		printf '%s\n' "$dump" | grep -qF "udp dport 443 drop" ||
+			missing="$missing блокировка-quic"
+	else
+		printf '%s\n' "$dump" | grep -qF "udp dport 443 drop" &&
+			missing="$missing лишняя-блокировка-quic"
+	fi
 
 	# nft печатает имя интерфейса в кавычках, но старые версии — без
 	printf '%s\n' "$dump" | grep -qE "iifname \"?$LAN_IF\"?([[:space:]]|$)" ||
@@ -312,8 +324,11 @@ setup_network() {
 	nft add rule "$TABLE_NAME" xray_tproxy ip daddr @dns_v4 tcp dport != 53 return
 	nft add rule "$TABLE_NAME" xray_tproxy ip daddr @dns_v4 udp dport != 53 return
 
-	# 7. Блокировка QUIC (UDP/443) — на входе, ДО TProxy
-	nft add rule "$TABLE_NAME" xray_tproxy iifname "$LAN_IF" udp dport 443 drop
+	# 7. Блокировка QUIC (UDP/443) — на входе, ДО TProxy.
+	# Тот же ключ routing.block_quic управляет правилом в Xray
+	if [ "$BLOCK_QUIC" = "true" ]; then
+		nft add rule "$TABLE_NAME" xray_tproxy iifname "$LAN_IF" udp dport 443 drop
+	fi
 
 	# 8. Отбрасываем IPv6 трафик от клиентов (шлюз — IPv4-only)
 	nft add rule "$TABLE_NAME" xray_tproxy meta nfproto ipv6 drop

@@ -160,6 +160,7 @@
       "doh.opendns.com",
       "unfiltered.adguard-dns.com",
       "doh.ffmuc.net"
-    ]
+    ],
+    "block_quic": false
   }
 }
