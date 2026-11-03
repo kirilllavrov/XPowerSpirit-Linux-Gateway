@@ -57,6 +57,10 @@
       "unfiltered.adguard-dns.com": [
         "94.140.14.140",
         "94.140.14.141"
+      ],
+      "dns.quad9.net": [
+        "9.9.9.9",
+        "149.112.112.112"
       ]
     },
     "servers": [
@@ -77,6 +81,10 @@
       },
       {
         "address": "https+local://cloudflare-dns.com/dns-query",
+        "skipFallback": false
+      },
+      {
+        "address": "quic+local://dns.quad9.net",
         "skipFallback": false
       },
       {

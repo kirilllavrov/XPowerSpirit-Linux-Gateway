@@ -182,7 +182,7 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 ```text
 Клиенты → dnsmasq :53 → Xray :15353 → dns-out (hijack) → dns-inbuilt (DoH)
                                                        ├─ зоны .ru/.su/.рф и geosite:category-ru → DoH Yandex
-                                                       └─ остальные → DoH Cloudflare / unfiltered AdGuard / ffmuc.net
+                                                       └─ остальные → DoH Cloudflare / DoQ Quad9 / unfiltered AdGuard / ffmuc.net
 
 Собственный DNS шлюза → 127.0.0.1:53 (тот же dnsmasq) → Xray
 ```
@@ -194,6 +194,10 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 Если Xray остановлен, dnsmasq отвечает через `dns.dnsmasq_fallback` (`77.88.8.8`) — клиенты не остаются без DNS.
 
 Формат `domains` у DNS-сервера — тот же, что у `domain` в правилах маршрутизации, поэтому здесь работают и префикс `domain:`, и категории `geosite:`. Без префикса домен считается полным (`full:`) — так задаются имена самих DoH-серверов в `dns.hosts`.
+
+Quad9 работает по **DNS over QUIC** (`quic+local://dns.quad9.net`, режим DOQL): запросы идут по UDP/853
+мимо routing напрямую через Freedom outbound. Домен резолвера при этом обязан быть в `dns.hosts` — иначе
+получилась бы петля, а его IP не попал бы в bypass nftables (список берётся из `dns.hosts`).
 
 Запросы к DoH-серверам идут через `https+local://` — режим DOHL, то есть **мимо** routing и прокси, напрямую. Имена DoH-серверов при этом должны разрешаться без обращения к внешнему DNS, поэтому их IP указаны в `dns.hosts`: на шлюзе системный резолвер сам ходит через Xray, и без этих записей получился бы цикл `Xray → DoH → DNS → Xray`.
 
