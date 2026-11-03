@@ -154,21 +154,27 @@ def is_placeholder(ob: dict) -> bool:
 # -----------------------------
 # ВЫБОР ПРОФИЛЯ
 # -----------------------------
-def select_profile(configs: list, remarks_filter: str):
+def select_profile(configs: list, remarks_filter: str, quiet: bool = False):
     """
     Возвращает выбранный профиль.
     Без фильтра берётся первый профиль подписки; с фильтром — первый,
     в чьём remarks встречается подстрока (регистр не важен).
+    quiet — не писать ошибку и список профилей (для необязательного фильтра).
     """
     if not remarks_filter:
         chosen = configs[0]
-        log(f"  → Профиль не задан, используется первый: {chosen.get('remarks', '(без имени)')}")
+        if not quiet:
+            log(f"  → Профиль не задан, используется первый: {chosen.get('remarks', '(без имени)')}")
         return chosen
 
     for config in configs:
         if remarks_filter.lower() in str(config.get("remarks", "")).lower():
-            log(f"  → Выбран профиль: {config.get('remarks', '')}")
+            if not quiet:
+                log(f"  → Выбран профиль: {config.get('remarks', '')}")
             return config
+
+    if quiet:
+        return None
 
     log(f"  [X] Профиль с remarks '{remarks_filter}' не найден!")
     log("  → Доступные профили:")
@@ -223,6 +229,9 @@ def main():
     parser.add_argument('--remarks', default='',
                         help='Фильтр по remarks: подстрока, регистр не важен. '
                              'Без него берётся первый профиль подписки')
+    parser.add_argument('--remarks-streaming', default='',
+                        help='Фильтр remarks для отдельного пула игр и стриминга. '
+                             'Пусто — пул берётся из основного профиля')
     parser.add_argument('--ua', default='',
                         help='Не используется (подписка всегда JSON), оставлен для совместимости')
     args = parser.parse_args()
@@ -274,12 +283,37 @@ def main():
 
     log(f"  → Прокси в профиле: {len(outbounds)}")
 
-    print(json.dumps({
+    result = {
         "hole": hole,
         "remarks": chosen.get("remarks", ""),
         "reason": reason,
         "outbounds": outbounds,
-    }, indent=2, ensure_ascii=False))
+    }
+
+    # Второй профиль — отдельный пул для игр и стриминга. Российские входные
+    # узлы отправляют трафик дальше на европейские, поэтому для стриминга
+    # берём европейскую группу напрямую, если она есть в подписке.
+    # Профиль необязателен: нет группы — пул соберётся из основного профиля.
+    if args.remarks_streaming:
+        current = str(chosen.get("remarks", "")).lower()
+        if args.remarks_streaming.lower() in current:
+            log("  → Профиль стриминга совпал с основным — отдельный пул не нужен")
+        else:
+            group = select_profile(configs, args.remarks_streaming, quiet=True)
+            if group is None:
+                log(f"  [!] Профиль стриминга '{args.remarks_streaming}' не найден — "
+                    "пул соберётся из основного профиля")
+            else:
+                stream_outbounds = collect_outbounds(group)
+                log(f"  → Пул стриминга: {group.get('remarks', '')} "
+                    f"({len(stream_outbounds)} прокси)")
+                if stream_outbounds:
+                    result["streaming"] = {
+                        "remarks": group.get("remarks", ""),
+                        "outbounds": stream_outbounds,
+                    }
+
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

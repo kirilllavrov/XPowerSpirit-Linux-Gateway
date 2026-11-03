@@ -110,7 +110,8 @@
     ],
     "streaming": {
       "enabled": true,
-      "strategy": "leastPing"
+      "strategy": "leastPing",
+      "profile": ""
     },
     "fallback_tag": "direct"
   },

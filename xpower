@@ -382,8 +382,11 @@ else:
             detail = 'expected=%s, maxRTT=%s' % (ss.get('expected', '?'), ss.get('maxRTT', '?'))
         else:
             detail = 'по задержке'
+        sel = b.get('selector') or []
+        if b.get('tag') == 'balancer-stream' and any(str(t).startswith('stream-') for t in sel):
+            detail = '%s, из профиля стриминга' % detail
         print('    tag=%s, стратегия=%s, серверов=%d, %s, fallback=%s' % (
-            b.get('tag', '?'), st.get('type', '?'), len(b.get('selector') or []),
+            b.get('tag', '?'), st.get('type', '?'), len(sel),
             detail, b.get('fallbackTag', '—')))
 " 2>/dev/null || echo "    (ошибка чтения конфига)"
 	else
@@ -565,7 +568,12 @@ print('Прокси-серверов: %d' % len(proxies))
 
 bal = (cfg.get('routing', {}).get('balancers') or [])
 if bal and len(proxies) > 1:
-    print('Балансировщик: %s (%s)' % (bal[0].get('tag', '?'), (bal[0].get('strategy') or {}).get('type', '?')))
+    for b in bal:
+        st = (b.get('strategy') or {})
+        sel = b.get('selector') or []
+        src = ' (профиль стриминга)' if any(str(t).startswith('stream-') for t in sel) else ''
+        print('Балансировщик: %s (%s, серверов %d)%s' % (
+            b.get('tag', '?'), st.get('type', '?'), len(sel), src))
 print()
 
 for o in proxies:

@@ -38,6 +38,11 @@ DEFAULT_TCP_KEEPALIVE_INTERVAL = 30
 # игр и стриминга — leastPing (по задержке): в играх важна именно она.
 BALANCER_TAG = "balancer"
 STREAMING_TAG = "balancer-stream"
+
+# Теги прокси второго профиля (пул игр и стриминга) получают префикс: в подписке
+# обе группы называют серверы одинаково (proxy, proxy-2, …), а в одном конфиге
+# теги обязаны быть уникальными
+STREAM_PREFIX = "stream-"
 DEFAULT_DNS_SERVERS = [
     {
         "address": "https+local://common.dot.dns.yandex.net/dns-query",
@@ -424,7 +429,7 @@ def build_dns_outbound() -> dict:
     }
 
 
-def build_rules(proxy_outbounds: list) -> list:
+def build_rules(proxy_outbounds: list, stream_enabled: bool = None) -> list:
     """
     Строит правила маршрутизации.
     Если proxy_outbounds пуст — все правила ведут на direct.
@@ -524,12 +529,23 @@ def build_rules(proxy_outbounds: list) -> list:
 
         # Игры и стриминг — в отдельный пул с leastPing: там решает задержка,
         # а не загрузка узла. Если пул не создаётся — туда же, куда всё остальное.
-        stream_target = STREAMING_TAG if streaming_enabled(proxy_outbounds) else target
-        rules.append({
-            "type": "field",
-            "domain": proxy_domains,
-            route_key: stream_target
-        })
+        if stream_enabled is None:
+            stream_enabled = streaming_enabled(proxy_outbounds)
+        # Пул стриминга — всегда балансировщик, поэтому ключ правила свой.
+        # Он не зависит от числа серверов в основном профиле: при одном прокси
+        # route_key был бы outboundTag, и тег балансировщика попал бы не туда.
+        if stream_enabled:
+            rules.append({
+                "type": "field",
+                "domain": proxy_domains,
+                "balancerTag": STREAMING_TAG
+            })
+        else:
+            rules.append({
+                "type": "field",
+                "domain": proxy_domains,
+                route_key: target
+            })
 
         # Весь остальной трафик
         rules.append({
@@ -581,9 +597,22 @@ def build_balancer(proxy_outbounds: list, tag: str = BALANCER_TAG,
     }
 
 
-def streaming_enabled(proxy_outbounds: list) -> bool:
-    """Отдельный пул имеет смысл только при нескольких серверах"""
-    return bool(setting("balancer.streaming.enabled", True)) and len(proxy_outbounds) > 1
+def streaming_pool(proxy_outbounds: list, streaming_outbounds: list = None) -> list:
+    """
+    Прокси для пула игр и стриминга.
+    Если в подписке нашёлся отдельный профиль (balancer.streaming.profile) —
+    берём его серверы, иначе пул собирается из основного профиля.
+    Пустой список — пул не нужен.
+    """
+    if not setting("balancer.streaming.enabled", True):
+        return []
+    if streaming_outbounds:
+        return streaming_outbounds
+    return proxy_outbounds if len(proxy_outbounds) > 1 else []
+
+
+def streaming_enabled(proxy_outbounds: list, streaming_outbounds: list = None) -> bool:
+    return bool(streaming_pool(proxy_outbounds, streaming_outbounds))
 
 
 def streaming_strategy() -> str:
@@ -642,31 +671,40 @@ def write_config(cfg: dict, output_path: str) -> None:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 
-def assemble_config(proxy_outbounds: list, output_path: str):
+def assemble_config(proxy_outbounds: list, output_path: str,
+                    streaming_outbounds: list = None):
     """Собирает полный конфиг Xray из списка прокси-серверов и сохраняет."""
     if not proxy_outbounds:
         print("  [!] Нет прокси-серверов — DIRECT-режим", file=sys.stderr)
 
+    streaming_outbounds = streaming_outbounds or []
+    stream_pool = streaming_pool(proxy_outbounds, streaming_outbounds)
+
     cfg = base_config()
-    cfg["outbounds"] = proxy_outbounds + [
+    cfg["outbounds"] = proxy_outbounds + streaming_outbounds + [
         _default_direct_outbound(),
         _default_block_outbound(),
         build_dns_outbound()
     ]
 
-    if len(proxy_outbounds) > 1:
-        cfg.update(build_burst_observatory(proxy_outbounds))
+    # Наблюдатель обязан видеть и второй пул: leastPing без замеров молчит
+    if len(proxy_outbounds) > 1 or stream_pool:
+        cfg.update(build_burst_observatory(proxy_outbounds + streaming_outbounds))
 
     routing = {
         "domainStrategy": setting("routing.domain_strategy", "IPOnDemand"),
-        "rules": build_rules(proxy_outbounds),
+        "rules": build_rules(proxy_outbounds, stream_enabled=bool(stream_pool)),
     }
 
+    # Пул стриминга создаётся и при одном прокси в основном профиле: иначе
+    # правило ссылалось бы на несуществующий балансировщик
+    balancers = []
     if len(proxy_outbounds) > 1:
-        balancers = [build_balancer(proxy_outbounds)]
-        if streaming_enabled(proxy_outbounds):
-            balancers.append(build_balancer(proxy_outbounds, tag=STREAMING_TAG,
-                                            strategy=streaming_strategy()))
+        balancers.append(build_balancer(proxy_outbounds))
+    if stream_pool:
+        balancers.append(build_balancer(stream_pool, tag=STREAMING_TAG,
+                                       strategy=streaming_strategy()))
+    if balancers:
         routing["balancers"] = balancers
 
     cfg["routing"] = routing
@@ -674,9 +712,10 @@ def assemble_config(proxy_outbounds: list, output_path: str):
     print(f"  ✓ Сгенерировано {len(proxy_outbounds)} прокси", file=sys.stderr)
     if len(proxy_outbounds) > 1:
         print(f"  ✓ Балансировщик: {len(proxy_outbounds)} серверов (leastLoad)", file=sys.stderr)
-        if streaming_enabled(proxy_outbounds):
-            print(f"  ✓ Игры и стриминг: отдельный пул ({streaming_strategy()})",
-                  file=sys.stderr)
+        if stream_pool:
+            source = "отдельный профиль" if streaming_outbounds else "основной профиль"
+            print(f"  ✓ Игры и стриминг: {len(stream_pool)} серверов "
+                  f"({streaming_strategy()}, {source})", file=sys.stderr)
 
     write_config(cfg, output_path)
     print(f"  ✓ Конфиг сохранён: {output_path}", file=sys.stderr)
@@ -715,6 +754,19 @@ def main():
     hole = bool(data.get("hole", False))
     proxy_outbounds = [normalize_outbound(ob) for ob in data.get("outbounds") or []]
 
+    # Второй профиль подписки — пул игр и стриминга. Теги переименовываем:
+    # в подписке обе группы называют серверы одинаково
+    streaming_data = data.get("streaming") or {}
+    streaming_outbounds = []
+    if isinstance(streaming_data, dict):
+        for ob in streaming_data.get("outbounds") or []:
+            normalized = normalize_outbound(ob)
+            normalized["tag"] = STREAM_PREFIX + str(normalized.get("tag", "proxy"))
+            streaming_outbounds.append(normalized)
+    if streaming_outbounds:
+        print(f"  → Пул стриминга: {streaming_data.get('remarks', '')} "
+              f"({len(streaming_outbounds)} прокси)", file=sys.stderr)
+
     if hole or not proxy_outbounds:
         if hole:
             print("  [!] Подписка истекла (сервер 'hole').", file=sys.stderr)
@@ -729,7 +781,7 @@ def main():
         print(f"  ✓ DIRECT-конфиг сохранён: {args.output}", file=sys.stderr)
         return
 
-    assemble_config(proxy_outbounds, args.output)
+    assemble_config(proxy_outbounds, args.output, streaming_outbounds)
     write_status("proxy", len(proxy_outbounds), "", data.get("remarks", ""))
 
 

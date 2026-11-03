@@ -156,7 +156,7 @@ xpower test       # интернет, DNS, TProxy, выход через про�
 | `dns.block_rcode` | код отказа для DNS-блокировки: `3` (по умолчанию) — NXDOMAIN, `0` — NOERROR с пустым ответом |
 | `dns.servers` | список DNS-серверов встроенного DNS Xray. У Yandex DoH в `domains` перечислены `domain:ru`, `domain:su`, `domain:xn--p1ai`, `domain:рф` и `geosite:category-ru`: российские домены целиком уходят к нему, `expectedIPs: geoip:ru` отсекает ответы с зарубежными адресами, `skipFallback` не даёт переключиться на зарубежный резолвер. В `expectedIPs` обязательна звёздочка: по документации при пустом результате фильтра возвращаются исходные адреса — без неё домены, чьих подсетей нет в `geoip:ru` (например `rutube.ru`), получали пустой ответ и не открывались |
 | `balancer.expected`, `.max_rtt`, `.baselines`, `.fallback_tag` | основной пул `leastLoad` (по нагрузке) |
-| `balancer.streaming.enabled`, `.strategy` | отдельный пул `balancer-stream` для доменов из `routing.proxy.domains` (игры, стриминг): по умолчанию включён со стратегией `leastPing` — там решает задержка, а не загрузка узла |
+| `balancer.streaming.enabled`, `.strategy`, `.profile` | отдельный пул `balancer-stream` для доменов из `routing.proxy.domains` (игры, стриминг): по умолчанию включён со стратегией `leastPing` — там решает задержка, а не загрузка узла. `profile` — remarks второго профиля подписки: серверы пула берутся из него, а не из основного. Пусто — пул собирается из основного профиля |
 | `observatory.destination`, `.interval`, `.sampling`, `.timeout`, `.http_method` | `burstObservatory` |
 | `routing.domain_strategy` | `routing.domainStrategy` |
 | `routing.direct` / `.block` / `.proxy` / `.doh_bypass` | категории маршрутизации |
@@ -210,7 +210,8 @@ Quad9 работает по **DNS over QUIC** (`quic+local://dns.quad9.net`, р�
 - **burstObservatory** — пинг `connectivitycheck.gstatic.com/generate_204` (URL, интервал, число замеров — в `observatory`)
 - Сколько серверов использовать, отсечка по RTT и джиттеру — `balancer.expected`, `max_rtt`, `baselines`
 - При падении всех — переход на прямой трафик (`balancer.fallback_tag` → direct)
-- Игры и стриминг идут через второй пул `balancer-stream` с `leastPing`: он выбирает узел с наименьшей задержкой, тогда как основной `balancer` — с наименьшей загрузкой. Пул создаётся только при нескольких серверах и отключается ключом `balancer.streaming.enabled`
+- Игры и стриминг идут через второй пул `balancer-stream` с `leastPing`: он выбирает узел с наименьшей задержкой, тогда как основной `balancer` — с наименьшей загрузкой. Отключается ключом `balancer.streaming.enabled`.
+- **Отдельный профиль для пула.** В подписке российские входные узлы (`auto*.freenternet.top`) отправляют трафик дальше на европейские, поэтому для стриминга есть смысл брать европейскую группу напрямую: `balancer.streaming.profile: "Европа (авто)"` — подстрока `remarks`, как в `subscription.remarks`. Парсер разбирает вторую группу в ключ `streaming`, генератор переименовывает её серверы с префиксом `stream-` (в подписке обе группы называют серверы одинаково) и строит пул из них. `burstObservatory` при этом видит серверы обоих профилей, иначе `leastPing` нечем мерить. Группы нет в подписке — пул молча собирается из основного профиля
 - **Режим DIRECT**: если подписка истекла или в профиле не осталось рабочих серверов
   (например, исчерпан лимит устройств) — весь трафик идёт напрямую
 

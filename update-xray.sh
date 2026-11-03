@@ -311,6 +311,12 @@ if fetch_url "$SUB_URL" "$TMP_DIR/sub.txt" "x-hwid: $HWID"; then
 	# Единый пайплайн: парсер (с автоопределением формата) → генератор
 	PARSER_ARGS="python3 $PARSER --ua \"$SUB_USER_AGENT\""
 	[ -n "$REMARKS_FILTER" ] && PARSER_ARGS="$PARSER_ARGS --remarks \"$REMARKS_FILTER\""
+	# Отдельный профиль для пула игр и стриминга: в подписке российские входные
+	# узлы отправляют трафик дальше на европейские, и для стриминга берётся
+	# европейская группа напрямую
+	STREAM_REMARKS="$(settings_get '.balancer.streaming.profile')"
+	[ -n "$STREAM_REMARKS" ] && echo "→ Профиль стриминга: $STREAM_REMARKS" >>"$LOG"
+	[ -n "$STREAM_REMARKS" ] && PARSER_ARGS="$PARSER_ARGS --remarks-streaming \"$STREAM_REMARKS\""
 
 	if eval $PARSER_ARGS < "$TMP_DIR/sub.txt" > "$TMP_DIR/parsed.json" 2>>"$LOG"; then
 		if python3 "$GENERATOR" --format unified --output "$TMP_DIR/config.json" < "$TMP_DIR/parsed.json" 2>>"$LOG"; then
