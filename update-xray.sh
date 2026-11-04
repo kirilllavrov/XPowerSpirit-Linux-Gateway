@@ -323,6 +323,22 @@ if fetch_url "$SUB_URL" "$TMP_DIR/sub.txt" "x-hwid: $HWID"; then
 			if $XRAY_BIN run -test -config "$TMP_DIR/config.json" >>"$LOG" 2>&1; then
 				mv "$TMP_DIR/config.json" "$CONFIG_JSON"
 				echo "[+] Новый config.json установлен" >>"$LOG"
+
+				# Адреса всех узлов подписки, включая профили, которые шлюз не
+				# выбирает: из них update-nft.sh строит bypass. Клиент в LAN может
+				# запустить свой Xray с этой же подпиской и другим профилем — его
+				# трафик к узлу не должен заворачиваться в TProxy. В файле только
+				# хосты: ни UUID, ни ключей, ни REALITY.
+				nodes_file="$STATE_DIR/subscription-nodes.txt"
+				if jq -e '.node_addresses | length > 0' "$TMP_DIR/parsed.json" >/dev/null 2>&1; then
+					if jq -r '.node_addresses[]' "$TMP_DIR/parsed.json" >"${nodes_file}.new" 2>>"$LOG" &&
+						mv "${nodes_file}.new" "$nodes_file"; then
+						echo "[+] Адресов узлов для bypass: $(wc -l <"$nodes_file") (все профили подписки)" >>"$LOG"
+					else
+						rm -f "${nodes_file}.new"
+						echo "[!] Не удалось сохранить список адресов узлов" >>"$LOG"
+					fi
+				fi
 			else
 				echo "[X] Новый config.json невалиден" >>"$LOG"
 				$XRAY_BIN run -test -config "$TMP_DIR/config.json" 2>>"$LOG"

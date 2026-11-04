@@ -221,6 +221,36 @@ def collect_outbounds(config: dict) -> list:
     return result
 
 
+def node_addresses(configs: list) -> list:
+    """
+    Адреса ВСЕХ узлов подписки, включая профили, которые шлюз не выбирает:
+    по ним update-nft.sh строит bypass, чтобы трафик к узлам не заворачивался
+    в TProxy. Нужно на случай, когда клиент в LAN запускает собственный Xray
+    с той же подпиской: его профиль может не совпадать с выбранным на шлюзе,
+    и трафик к узлу из «чужого» профиля проксировался бы второй раз.
+
+    Сохраняются только адреса — ни UUID, ни ключей, ни REALITY в файл не попадает.
+    """
+    found = set()
+    for config in configs:
+        for ob in config.get("outbounds") or []:
+            if not isinstance(ob, dict):
+                continue
+            if str(ob.get("protocol", "")) in SERVICE_PROTOCOLS:
+                continue
+            if is_placeholder(ob):
+                continue
+            settings = ob.get("settings")
+            if not isinstance(settings, dict):
+                continue
+            for entry in _server_entries(settings):
+                addr = str(entry.get("address", "")).strip()
+                if not addr or addr in PLACEHOLDER_ADDRESSES:
+                    continue
+                found.add(addr)
+    return sorted(found)
+
+
 # -----------------------------
 # ТОЧКА ВХОДА
 # -----------------------------
@@ -288,6 +318,8 @@ def main():
         "remarks": chosen.get("remarks", ""),
         "reason": reason,
         "outbounds": outbounds,
+        # Адреса узлов всех профилей — из них update-nft.sh собирает набор @nodes
+        "node_addresses": node_addresses(configs),
     }
 
     # Второй профиль — отдельный пул для игр и стриминга. Российские входные

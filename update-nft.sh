@@ -26,6 +26,16 @@ BYPASS_MARK=2
 BLOCK_QUIC=false
 TABLE_NAME="inet xray"
 SETTINGS_JSON="/etc/xray/settings.json"
+CONFIG_JSON="/etc/xray/config.json"
+
+# Узлы подписки: их адреса живут в именованном наборе @nodes, а трафик к ним
+# обходит TProxy одним правилом вместо десятка адресов в самом правиле.
+NODES_SET="nodes"
+# Список адресов всех профилей подписки; пишет update-xray.sh.
+# XRAY_NODES_FILE — для проверок без root и без установленного шлюза.
+NODES_FILE="${XRAY_NODES_FILE:-/etc/xray/state/subscription-nodes.txt}"
+SERVER_IPS=""
+NODES_SET_READY=0
 
 # Порты локальных сервисов на шлюзе (TorrServer и др.) — bypass TProxy
 # Пример с несколькими портами: LOCAL_TCP_PORTS="8090 8091 8443"
@@ -68,6 +78,88 @@ fi
 if [ -z "${DNS_IPS// /}" ]; then
 	echo "[!] settings.json: dns.hosts пуст — DoH-bypass в nftables отключён" >&2
 fi
+
+# ============================================
+#   АДРЕСА УЗЛОВ ПОДПИСКИ (набор @nodes)
+# ============================================
+# Трафик к серверам прокси заворачивать в TProxy нельзя: соединение с сервером
+# ушло бы само в себя. Адреса берутся из двух источников:
+#   1. outbound'ы текущего config.json — то, через что шлюз работает сейчас;
+#   2. subscription-nodes.txt (пишет update-xray.sh) — адреса ВСЕХ профилей
+#      подписки: клиент в LAN может запустить свой Xray с этой же подпиской и
+#      другим профилем, и его трафик к узлу проксировался бы второй раз.
+# В подписках адрес часто задан доменом, поэтому имена резолвятся. Не удалось
+# разрешить — работаем без них: правила TProxy от этого не перестают быть верными.
+
+is_ipv4() {
+	[[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+	# 0.0.0.0 — заглушка «нет сервера»: ядро такой элемент набора не примет,
+	# а add_nodes_rule из-за него вернул бы ошибку и откатил все правила
+	[ "$1" != "0.0.0.0" ] || return 1
+	local octet
+	for octet in "${BASH_REMATCH[@]:1}"; do
+		[ "$octet" -le 255 ] || return 1
+	done
+	return 0
+}
+
+resolve_ipv4() {
+	command -v getent >/dev/null 2>&1 || return 0
+	local ip
+	for ip in $(getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u); do
+		# getent отдаёт и литеральные адреса (например, 0.0.0.0 из заглушки)
+		if is_ipv4 "$ip"; then
+			printf '%s\n' "$ip"
+		fi
+	done
+	return 0
+}
+
+collect_servers() {
+	local candidates addr resolved
+	local unresolved=""
+
+	candidates=$(
+		{
+			if [ -f "$CONFIG_JSON" ]; then
+				jq -r '.outbounds[]?
+					| select(.protocol != "freedom" and .protocol != "blackhole"
+						and .protocol != "dns" and .protocol != "loopback")
+					| .settings.vnext[]?.address, .settings.servers[]?.address,
+					  .settings.address
+					| select(. != null)' "$CONFIG_JSON" 2>/dev/null || true
+			fi
+			if [ -f "$NODES_FILE" ]; then
+				grep -vE '^[[:space:]]*(#|$)' "$NODES_FILE" 2>/dev/null || true
+			fi
+		} | tr -d '\r' | sort -u
+	)
+
+	for addr in $candidates; do
+		if is_ipv4 "$addr"; then
+			SERVER_IPS="$SERVER_IPS $addr"
+			continue
+		fi
+		# Заглушка «нет сервера» — не ошибка резолвинга, просто пропускаем
+		if [ "$addr" = "0.0.0.0" ]; then
+			continue
+		fi
+		resolved=$(resolve_ipv4 "$addr")
+		if [ -n "$resolved" ]; then
+			SERVER_IPS="$SERVER_IPS $(printf '%s\n' "$resolved" | tr '\n' ' ')"
+		else
+			unresolved="$unresolved $addr"
+		fi
+	done
+
+	SERVER_IPS=$(printf '%s\n' $SERVER_IPS | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+
+	if [ -n "$unresolved" ]; then
+		echo "[!] Не удалось определить IP серверов прокси:$unresolved — их трафик пойдёт через TProxy" >&2
+	fi
+}
+
+collect_servers
 
 # ============================================
 #   ОПРЕДЕЛЕНИЕ LAN-ИНТЕРФЕЙСА
@@ -148,6 +240,11 @@ GW_IP=$(ip -4 addr show "$LAN_IF" | grep 'inet ' | awk '{print $2}' | cut -d'/' 
 echo "→ LAN интерфейс: $LAN_IF"
 echo "→ IP шлюза: ${GW_IP:-не определён}"
 echo "→ Xray GID: $XRAY_GID"
+if [ -n "${SERVER_IPS// /}" ]; then
+	echo "→ Узлы для bypass (@$NODES_SET): $(printf '%s\n' $SERVER_IPS | grep -c .) адресов"
+else
+	echo "[!] Адреса узлов подписки не определены — bypass узлов отключён" >&2
+fi
 
 # ============================================
 #   ОЧИСТКА ПРАВИЛ
@@ -218,9 +315,34 @@ verify_rules() {
 	printf '%s\n' "$dump" | grep -qE "iifname \"?$LAN_IF\"?([[:space:]]|$)" ||
 		missing="$missing правила-для-$LAN_IF"
 
+	# Адреса узлов подписки живут в именованном наборе @nodes: правило обязано
+	# быть в обеих цепочках — в PREROUTING (трафик клиентов) и в OUTPUT
+	if [ -n "${SERVER_IPS// /}" ]; then
+		local chain_tproxy chain_output
+		chain_tproxy=$(nft list chain "$TABLE_NAME" xray_tproxy 2>/dev/null)
+		chain_output=$(nft list chain "$TABLE_NAME" xray_output 2>/dev/null)
+		printf '%s\n' "$chain_tproxy" | grep -qF "ip daddr @$NODES_SET" ||
+			missing="$missing bypass-узлов-xray_tproxy"
+		printf '%s\n' "$chain_output" | grep -qF "ip daddr @$NODES_SET" ||
+			missing="$missing bypass-узлов-xray_output"
+	fi
+
 	if [ -n "$missing" ]; then
 		echo "[X] После применения не найдено:$missing" >&2
 		return 1
+	fi
+
+	# Ядро могло не принять часть элементов набора — тогда bypass неполный
+	if [ -n "${SERVER_IPS// /}" ]; then
+		local listed ip
+		listed=$(nft list set "$TABLE_NAME" "$NODES_SET" 2>/dev/null)
+		for ip in $SERVER_IPS; do
+			printf '%s\n' "$listed" | grep -qF "$ip" ||
+				{
+					echo "[X] В наборе @$NODES_SET нет адреса узла $ip" >&2
+					return 1
+				}
+		done
 	fi
 
 	# Policy routing: без него трафик шлюза после mark уйдёт не в lo
@@ -238,6 +360,29 @@ verify_rules() {
 			return 1
 		}
 
+	return 0
+}
+
+# ============================================
+#   НАБОР АДРЕСОВ УЗЛОВ + ПРАВИЛО BYPASS
+# ============================================
+# Набор создаётся один раз на таблицу, правила — в каждой цепочке своё.
+# Возвращает 1, если адресов нет: пустой набор сделал бы правило бесполезным.
+add_nodes_rule() {
+	local chain="$1" ip list=""
+
+	[ -n "${SERVER_IPS// /}" ] || return 1
+
+	if [ "$NODES_SET_READY" != "1" ]; then
+		nft add set "$TABLE_NAME" "$NODES_SET" "{ type ipv4_addr ; }" || return 1
+		for ip in $SERVER_IPS; do
+			list="$list${list:+, }$ip"
+		done
+		nft add element "$TABLE_NAME" "$NODES_SET" "{ $list }" || return 1
+		NODES_SET_READY=1
+	fi
+
+	nft add rule "$TABLE_NAME" "$chain" ip daddr "@$NODES_SET" return || return 1
 	return 0
 }
 
@@ -320,6 +465,12 @@ setup_network() {
 	# 5. Приватные/мультикаст/бродкаст адреса — не трогаем
 	nft add rule "$TABLE_NAME" xray_tproxy ip daddr @reserved_v4 return
 
+	# 5.1. Узлы подписки: клиент в LAN может держать собственный Xray с этой же
+	#      подпиской — трафик к узлам не должен заворачиваться в TProxy повторно
+	if add_nodes_rule xray_tproxy; then
+		echo "  ✓ bypass узлов подписки (@$NODES_SET)"
+	fi
+
 	# 6. Публичные DNS (не-DNS трафик к этим IP) — bypass
 	nft add rule "$TABLE_NAME" xray_tproxy ip daddr @dns_v4 tcp dport != 53 return
 	nft add rule "$TABLE_NAME" xray_tproxy ip daddr @dns_v4 udp dport != 53 return
@@ -370,6 +521,11 @@ setup_network() {
 	# 3. Пропускаем локальный трафик
 	nft add rule "$TABLE_NAME" xray_output fib daddr type local return
 	nft add rule "$TABLE_NAME" xray_output ip daddr @reserved_v4 return
+
+	# 3.1. Узлы подписки — то же, что в PREROUTING: собственный трафик шлюза к
+	#      узлам не маркируется. Набор уже создан выше; если правило не встанет,
+	#      проверка применённых правил откатит изменения
+	add_nodes_rule xray_output || true
 
 	# 4. ЯВНЫЙ bypass DoH/DNS запросов от встроенного DNS Xray
 	#    (на случай если mark ещё не установлен на первом пакете)

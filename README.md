@@ -222,6 +222,7 @@ Quad9 работает по **DNS over QUIC** (`quic+local://dns.quad9.net`, р�
 - все outbound'ы помечаются `sockopt.mark` = `xray.bypass_mark` (по умолчанию 2);
 - в `PREROUTING` правило `meta mark 2 return` пропускает такие пакеты мимо TProxy;
 - в `OUTPUT` дополнительно работает `meta skgid <xray.gid>` — трафик процессов группы `xray` помечается bypass-меткой (работает даже если `sockopt.mark` не применился);
+- **Узлы подписки в наборе `@nodes`.** Адреса всех серверов подписки — включая профили, которые шлюз не выбрал, — собираются в именованный набор `nodes`, а правила `ip daddr @nodes return` в `PREROUTING` и `OUTPUT` не дают завернуть их в TProxy. Это нужно, когда клиент в LAN держит собственный Xray с той же подпиской: без bypass его туннель до узла проксировался бы второй раз. Список адресов всех профилей пишет `update-xray.sh` в `/etc/xray/state/subscription-nodes.txt` (только хосты — ни UUID, ни ключей, ни REALITY), при пересборке правил домены резолвятся в IPv4, а неразрешённые адреса просто не попадают в набор;
 - к локальным адресам (`fib daddr type local`), приватным сетям, DoH-серверам, NTP, ICMP и DHCP правила не применяются вовсе.
 - ICMP исключён намеренно: TProxy в `PREROUTING` перехватывает только `tcp`/`udp`, поэтому помеченный ICMP-пакет уходит на `lo` и теряется — без этого исключения `ping`/`traceroute` с самого шлюза не работают. ICMP от клиентов идёт как обычный форвардинг и через прокси не проходит.
 
@@ -354,6 +355,7 @@ sudo /usr/local/share/xray/update-xray.sh
 ├── config.json                         # генерируется из подписки
 └── state/
     ├── status.json                     # режим, причина DIRECT, профиль (для xpower)
+    ├── subscription-nodes.txt          # адреса узлов всех профилей → набор @nodes
     ├── xray.zip.sha256sum              # SHA-кеши для инкрементальных обновлений
     ├── geoip.dat.sha256sum
     └── geosite.dat.sha256sum
@@ -377,7 +379,7 @@ sudo /usr/local/share/xray/update-xray.sh
 | --- | --- |
 | В `xpower status` «DIRECT — no_proxies» | Подписка вернула заглушки: исчерпан лимит устройств (адрес `0.0.0.0`, порт `1`, нулевой UUID) или список пуст. Отвяжите лишние устройства в личном кабинете провайдера и выполните `xpower update` |
 | В `xpower status` «DIRECT — expired» | В подписке сервер с адресом `hole` — срок действия истёк |
-| Нет интернета у клиентов, у шлюза есть | `xpower test`: если «TProxy не слушает» — `xpower restart`; если «nftables bypass: правило не найдено» — `xpower setup` |
+| Нет интернета у клиентов, у шлюза есть | `xpower test`: если «TProxy не слушает» — `xpower restart`; если «nftables bypass: правило не найдено» или «bypass узлов: набор @nodes не найден» — `xpower setup` |
 | Не открываются сайты по именам, по IP работают | DNS: `xpower test` покажет, отвечают ли dnsmasq :53 и Xray `dns-in`. Логи Xray — `journalctl -u xray -f` с `log.loglevel: "info"` и `log.dnsLog: true` |
 | После обновления не применился конфиг | Смотрите `/var/log/xray-update.log`: новый `config.json` не прошёл `xray run -test` — остался прежний рабочий конфиг |
 | Клиенты ходят напрямую вместо прокси | `xpower profile` — возможно, выбран профиль без рабочих серверов; профиль задаётся `subscription.remarks` |
