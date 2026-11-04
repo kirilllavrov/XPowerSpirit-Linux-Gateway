@@ -269,7 +269,12 @@ xpower logs              # journalctl -u xray -f
 xpower config            # показать config.json
 xpower setup             # переприменить правила nftables
 xpower version
+xpower help              # общий список команд
+xpower help <команда>    # подробная справка: синтаксис, root, зависимости, примеры
 ```
+
+Справку по любой команде можно получить и вторым аргументом: `xpower status --help`,
+`xpower update -h`. Запуск `xpower` без аргументов показывает общий список.
 
 Для `status`/`traffic` в конфиг добавляются `stats`, `api` и `policy`
 (`api.enabled`, `api.listen_port` в `settings.json`; по умолчанию

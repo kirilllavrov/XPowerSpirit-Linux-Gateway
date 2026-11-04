@@ -43,21 +43,304 @@ usage() {
 XPowerSpirit Gateway — управление прозрачным шлюзом Xray
 
 Использование:
+  xpower <команда> [аргументы]
+  xpower help <команда>    подробная справка по одной команде
+
+Состояние:
   xpower status            Состояние шлюза (сервис, nftables, DNS, подписка, трафик)
+  xpower test              Проверки: интернет, DNS, TProxy, маршрутизация
+  xpower traffic           Трафик по серверам (через API Xray)
+  xpower version           Версии CLI и Xray
+
+Управление сервисом (нужен root):
   xpower start             Запустить Xray
   xpower stop              Остановить Xray
   xpower restart           Перезапустить Xray
   xpower toggle            Включить/выключить Xray
+
+Обновление и правила (нужен root):
   xpower update            Обновить Xray, geo, подписку и config.json
-  xpower test              Проверки: интернет, DNS, TProxy, маршрутизация
-  xpower traffic           Трафик по серверам (через API Xray)
-  xpower logs              Логи Xray в реальном времени
+  xpower setup             Переприменить правила nftables
+
+Настройка и диагностика:
+  xpower profile [ФИЛЬТР]  Показать профиль подписки или переключить на другой
   xpower config            Показать config.json
   xpower proxy-list        Список прокси-серверов
-  xpower profile [ФИЛЬТР]  Показать профиль подписки или переключить на другой
-  xpower setup             Переприменить правила nftables
-  xpower version           Версии CLI и Xray
+  xpower logs              Логи Xray в реальном времени (нужен root)
+
+Справка:
+  xpower help              Эта справка
+  xpower help <команда>    Подробно: что делает команда, от чего зависит, примеры
+
+То же, что xpower help <команда>: xpower --help, xpower -h,
+xpower <команда> --help и xpower <команда> -h.
 EOF
+}
+
+# Подробная справка по одной команде: xpower help status
+# Та же справка доступна как xpower status --help
+command_help() {
+	case "$1" in
+	status)
+		cat <<EOF
+xpower status — состояние шлюза
+
+Синтаксис:
+  xpower status
+
+Root: не нужен; nftables и policy routing читаются, если есть беспарольный sudo.
+
+Показывает:
+  - сервис $SERVICE (активен/остановлен);
+  - таблицу nftables inet xray: bypass-метка и набор @nodes;
+  - policy routing: ip rule fwmark → table 100;
+  - DNS: dnsmasq :53 и Xray dns-in;
+  - режим подписки из $STATUS_JSON: proxy/direct,
+    причина DIRECT-режима и выбранный профиль;
+  - балансировщик из $CONFIG_JSON;
+  - трафик по серверам, если Xray запущен и api.enabled=true.
+
+Пример:
+  xpower status
+EOF
+		;;
+	test)
+		cat <<EOF
+xpower test — проверка работы шлюза
+
+Синтаксис:
+  xpower test
+
+Root: не нужен, но проверки nftables требуют root или беспарольного sudo.
+
+Проверяет:
+  - интернет на самом шлюзе;
+  - DNS dnsmasq :53;
+  - DNS Xray dns-in (порт из $CONFIG_JSON, по умолчанию 15353);
+  - слушает ли TProxy-порт (по умолчанию 12345);
+  - включена ли DNS-блокировка (число правил-отказов в dns.hosts);
+  - выход в интернет через прокси (generate_204, две попытки);
+  - bypass-метку xray.bypass_mark в nftables;
+  - bypass узлов подписки (ip daddr @nodes);
+  - валидность config.json через xray run -test.
+
+Пример:
+  xpower test
+EOF
+		;;
+	traffic)
+		cat <<EOF
+xpower traffic — трафик по серверам
+
+Синтаксис:
+  xpower traffic
+
+Root: не нужен.
+
+Берёт счётчики outbound>>>tag>>>traffic>>>uplink|downlink через gRPC API Xray.
+Требует api.enabled=true в $SETTINGS_JSON и запущенного Xray — иначе сообщает,
+что данных нет.
+
+Служебные outbound (direct, block, dns-out, api) в список серверов не попадают.
+Строки серверов пула стриминга имеют префикс stream-.
+
+Пример:
+  xpower traffic
+EOF
+		;;
+	start | stop | restart | toggle)
+		cat <<EOF
+xpower $1 — управление сервисом Xray
+
+Синтаксис:
+  xpower start      запустить $SERVICE
+  xpower stop       остановить $SERVICE
+  xpower restart    перезапустить $SERVICE
+  xpower toggle     остановить, если запущен, иначе запустить
+
+Root: нужен (через sudo, если не root).
+
+Работает через systemctl. При остановке Xray срабатывает ExecStopPost
+и правила nftables снимаются — трафик идёт напрямую.
+
+Пример:
+  xpower restart
+EOF
+		;;
+	update)
+		cat <<EOF
+xpower update — полное обновление шлюза
+
+Синтаксис:
+  xpower update
+
+Root: нужен.
+
+Запускает $UPDATE_SCRIPT — то же, что ежедневный cron в 2:30:
+  Xray (GitHub Releases, проверка SHA) → geoip.dat и geosite.dat (проверка SHA)
+  → подписка → парсер → генератор config.json → xray run -test
+  → правила nftables → перезапуск Xray.
+
+Новый config.json применяется только если прошёл xray run -test;
+иначе остаётся прежний рабочий конфиг.
+
+Код возврата: не 0, если правила nftables не применились — в этом случае
+проксирование не работает.
+
+Журнал: /var/log/xray-update.log
+
+Пример:
+  xpower update
+EOF
+		;;
+	setup)
+		cat <<EOF
+xpower setup — переприменить правила nftables
+
+Синтаксис:
+  xpower setup
+
+Root: нужен.
+
+Запускает $NFT_SCRIPT: пересобирает таблицу inet xray, policy routing
+(table 100 → lo) и набор адресов узлов подписки @nodes.
+
+При ошибке на середине правила снимаются целиком (трафик идёт напрямую),
+а команда завершается с ненулевым кодом.
+
+Когда нужно: сообщение «bypass узлов: набор @nodes не найден» в xpower test.
+
+Читает из $SETTINGS_JSON: xray.gid, xray.tproxy_port, xray.tproxy_mark,
+xray.bypass_mark, routing.block_quic, network.interface, dns.hosts.
+Ещё нужны $CONFIG_JSON и $CONFIG_DIR/state/subscription-nodes.txt.
+
+Пример:
+  xpower setup
+EOF
+		;;
+	logs)
+		cat <<EOF
+xpower logs — журнал Xray в реальном времени
+
+Синтаксис:
+  xpower logs
+
+Root: нужен.
+
+Выполняет journalctl -u $SERVICE -f. Подробность задаётся ключом
+log.loglevel в $SETTINGS_JSON; при значении none (по умолчанию)
+сообщений почти нет — для диагностики поставьте info.
+Для DNS-запросов нужен также log.dnsLog.
+
+Выход: Ctrl+C.
+
+Пример:
+  xpower logs
+EOF
+		;;
+	config)
+		cat <<EOF
+xpower config — показать config.json
+
+Синтаксис:
+  xpower config
+
+Root: не нужен.
+
+Печатает первые 100 строк $CONFIG_JSON и сколько строк осталось.
+Файл генерируется из подписки — правки в нём затрутся при следующем
+xpower update.
+
+Проверить конфиг вручную:
+  $XRAY_BIN run -test -config $CONFIG_JSON
+
+Пример:
+  xpower config
+EOF
+		;;
+	proxy-list)
+		cat <<EOF
+xpower proxy-list — прокси-серверы из config.json
+
+Синтаксис:
+  xpower proxy-list
+
+Root: не нужен.
+
+Для каждого прокси показывает тег, протокол, адрес и порт, сеть и security,
+а также sockopt.mark. Отдельно перечисляет балансировщики: тег, тип стратегии
+(leastLoad или leastPing) и число серверов в selector.
+
+Пример:
+  xpower proxy-list
+EOF
+		;;
+	profile)
+		cat <<EOF
+xpower profile [ФИЛЬТР] — профиль подписки
+
+Синтаксис:
+  xpower profile              показать текущий профиль (root не нужен)
+  xpower profile "LTE 1"      переключить на профиль по подстроке remarks
+  xpower profile --reset      сбросить (будет первый профиль подписки)
+
+Root: нужен для смены профиля, не нужен для просмотра.
+
+ФИЛЬТР — подстрока поля remarks, регистр не важен; совпадение ищется
+по первому профилю. Значение записывается в $SETTINGS_JSON →
+subscription.remarks, поэтому автообновление использует тот же профиль.
+
+Изменение вступает в силу после xpower update.
+
+Доступные профили:
+  grep 'Доступные профили' /var/log/xray-update.log
+
+Примеры:
+  xpower profile
+  xpower profile "Европа"
+  xpower profile --reset
+EOF
+		;;
+	version | --version | -V)
+		cat <<EOF
+xpower version — версии CLI и Xray
+
+Синтаксис:
+  xpower version
+
+Root: не нужен.
+
+Печатает версию CLI ($XPOWER_VERSION) и первую строку вывода $XRAY_BIN version.
+
+Пример:
+  xpower version
+EOF
+		;;
+	help | -h | --help)
+		cat <<EOF
+xpower help [КОМАНДА] — справка
+
+Синтаксис:
+  xpower help              общий список команд
+  xpower help status       подробно по одной команде
+
+Root: не нужен.
+
+Равнозначные формы:
+  xpower --help, xpower -h
+  xpower <команда> --help, xpower <команда> -h
+  xpower без аргументов
+
+Пример:
+  xpower help update
+EOF
+		;;
+	*)
+		echo -e "${RED}Неизвестная команда: $1${NC}" >&2
+		echo "Список команд: xpower help" >&2
+		return 1
+		;;
+	esac
 }
 
 # -----------------------------
@@ -675,6 +958,21 @@ do_version() {
 	fi
 }
 
+# Без аргументов — общая справка, а не «неизвестная команда»
+if [ "$#" -eq 0 ]; then
+	usage
+	exit 0
+fi
+
+# xpower <команда> --help — подробная справка по этой команде.
+# help и -h/--help первым аргументом обрабатываются в case ниже.
+case "${2:-}" in
+-h | --help)
+	command_help "$1" || exit 1
+	exit 0
+	;;
+esac
+
 case "${1:-}" in
 status) do_status ;;
 start)
@@ -708,9 +1006,17 @@ setup)
 	need_root && run_root "$NFT_SCRIPT"
 	;;
 version | --version | -V) do_version ;;
-help | -h | --help) usage ;;
+help)
+	if [ -n "${2:-}" ]; then
+		command_help "$2" || exit 1
+	else
+		usage
+	fi
+	;;
+-h | --help) usage ;;
 *)
 	echo "Неизвестная команда: ${1:-}"
+	echo "Список команд: xpower help"
 	echo ""
 	usage
 	exit 1
